@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local / Cursor (see project spec)
+tasks.md
+hci-lecture-master.md
+hci-ui-suggestions.md
+.cursor/

@@ -44,3 +44,31 @@ textarea {
   outline: 3px solid #4ea36c;
   outline-offset: 2px;
 }
+
+html.high-contrast {
+  --bg: #0b0f0c;
+  --bg-panel: #121815;
+  --text: #f2f7f2;
+  --muted: #a8b8a8;
+  --primary: #4cd686;
+  --primary-strong: #7ae8a4;
+  --danger: #ff8a7a;
+  --border: #2d3d32;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  /* Nested panels / cards (must pair with var(--text), not hardcoded light grays) */
+  --surface-inset: #1a211c;
+  --surface-muted: #1e2620;
+  --surface-chip: #283228;
+  --grid-line: #3a4a40;
+  --grid-faint: #2a332c;
+  color: var(--text);
+  background: var(--bg);
+}
+
+html.high-contrast input,
+html.high-contrast select,
+html.high-contrast textarea {
+  background: #1a211c;
+  color: var(--text);
+  border-color: var(--border);
+}

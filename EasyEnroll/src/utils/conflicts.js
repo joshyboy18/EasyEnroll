@@ -1,3 +1,5 @@
+import { formatTimeRange12h } from "./timeFormat.js"
+
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
 function toMinutes(time) {
@@ -5,12 +7,23 @@ function toMinutes(time) {
   return hour * 60 + minute
 }
 
+export { toMinutes }
+
+/** Mon–Fri columns in schedule grids (typical class week). */
+export const scheduleColumnDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd
 }
 
 export function meetingLabel(meetings) {
-  return meetings.map((m) => `${m.day} ${m.start}-${m.end}`).join(" | ")
+  return meetings
+    .map((m) => {
+      const range = formatTimeRange12h(m.start, m.end)
+      const lab = m.label ? ` (${m.label})` : ""
+      return `${m.day} ${range}${lab}`
+    })
+    .join(" | ")
 }
 
 export function hasCourseConflict(candidate, existingCourses) {
@@ -64,7 +77,7 @@ export function detectPlanConflicts(planCourses, events) {
     }
     const eventHits = getEventConflicts(planCourses[i], events)
     for (const event of eventHits) {
-      conflicts.push({ type: "event", a: planCourses[i].id, b: event.id })
+      conflicts.push({ type: "event", a: planCourses[i].id, b: event.id, bTitle: event.title })
     }
   }
   return conflicts
