@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
+import { TimeGridCalendar } from "./components/TimeGridCalendar.jsx"
+import { useToast } from "./components/ToastStack.jsx"
 import { loginWithPassword, loginWithSso } from "./utils/auth"
+import { buildTimeGridBlocks, getViewWindowFromBlocks, popoutHtmlForGrid } from "./utils/calendarLayout.js"
 import { courses } from "./data/courses"
 import { mockUsers } from "./data/mockUsers"
 import {
   detectPlanConflicts,
   getEventConflicts,
-  groupScheduleByDay,
   hasCourseConflict,
   meetingLabel,
-  weekDays,
+  scheduleColumnDays,
 } from "./utils/conflicts"
 import {
   getCourseDegreeMatches,
   getProgramNames,
-  getRecommendations,
+  getYearAwareRecommendations,
 } from "./utils/degreeProgress"
 import {
   clearAuthSession,
@@ -23,13 +25,64 @@ import {
   saveAuthSession,
   saveUserBucket,
 } from "./utils/storage"
+import { attachOpaqueCourseDrag, endCourseCardDrag } from "./utils/courseDrag.js"
+import { buildWeekScheduleIcs, downloadIcsFile } from "./utils/ics.js"
 
 const MAX_CREDITS = 19
+const SCHOOL_EMAIL_DOMAIN = "@school.edu"
+
+const VIEW_WAYFINDING = {
+  dashboard: "Enrollment — search the catalog, manage your term, and see your week.",
+  planning: "Planning — try alternate schedules before you enroll; compare to your current classes.",
+  profile: "Profile — identity fields and how this mock handles university policy.",
+  settings: "Settings — display, alerts, and accessibility for the planner.",
+}
+
+const EVENT_COLOR_PRESETS = ["#1f8f4c", "#2f6fcb", "#7a3d8c", "#b85c0a", "#0d4a4a", "#6b1d3d"]
+
+function isFormTypingTarget(el) {
+  if (!el) {
+    return false
+  }
+  if (el.isContentEditable) {
+    return true
+  }
+  const tag = el.tagName
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return true
+  }
+  const role = el.getAttribute?.("role")
+  if (role === "textbox" || role === "searchbox" || role === "combobox") {
+    return true
+  }
+  return false
+}
+
+function isHelpHotkey(e) {
+  if (e.key === "?" || e.key === "？") {
+    return true
+  }
+  if (e.code === "Slash" && e.shiftKey) {
+    return true
+  }
+  return false
+}
 
 const defaultSettings = {
   compactCalendar: false,
   showConflictAlerts: true,
   showReminderAlerts: true,
+  /** Extra soft UI when the OS does not already request reduce (stack with prefers-reduced-motion). */
+  reduceInterfaceMotion: false,
+  /** High-contrast theme for readability (also helps in bright light). */
+  highContrast: false,
+}
+
+function mergeSettingsWithDefaults(stored) {
+  if (!stored || typeof stored !== "object") {
+    return { ...defaultSettings }
+  }
+  return { ...defaultSettings, ...stored }
 }
 
 const defaultEvents = [
@@ -39,8 +92,24 @@ const defaultEvents = [
     days: ["Monday", "Wednesday"],
     start: "14:30",
     end: "16:30",
+    color: "#3d6b8f",
+    description: "Evening shift on campus.",
   },
 ]
+/* eventForm.details maps to Event.description in storage */
+
+function normalizeEventEntry(event) {
+  return {
+    ...event,
+    color: event.color || "#2f6fcb",
+    description: event.description ?? "",
+  }
+}
+
+function defaultProfileFromUser(user) {
+  const local = user.email.split("@")[0] || "student"
+  return { name: user.name, emailLocal: local, avatarDataUrl: "" }
+}
 
 function formatCourseMeta(course) {
   const seatText =
@@ -59,7 +128,6 @@ function CourseCard({
   onAdd,
   addLabel,
   draggable,
-  onDragStart,
   actionVariant = "primary",
   actionDisabled = false,
 }) {
@@ -67,7 +135,16 @@ function CourseCard({
     <article
       className="course-card"
       draggable={draggable}
-      onDragStart={(event) => onDragStart?.(event, course.id)}
+      onDragStart={(event) => {
+        if (draggable) {
+          attachOpaqueCourseDrag(event, course)
+        }
+      }}
+      onDragEnd={() => {
+        if (draggable) {
+          endCourseCardDrag()
+        }
+      }}
       onClick={() => onOpen(course)}
       role="button"
       tabIndex={0}
@@ -195,6 +272,7 @@ function LoginPage({
 function App() {
   const initialSession = loadAuthSession()
   const initialUser = mockUsers.find((entry) => entry.id === initialSession?.userId) || null
+  const { pushToast, ToastContainer } = useToast()
 
   const [session, setSession] = useState(() => initialSession)
   const [activeView, setActiveView] = useState("dashboard")
@@ -207,69 +285,125 @@ function App() {
   const [searchText, setSearchText] = useState("")
   const [departmentFilter, setDepartmentFilter] = useState("All")
   const [seatFilter, setSeatFilter] = useState("all")
+  const [programOnly, setProgramOnly] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [enrollmentUndoCourse, setEnrollmentUndoCourse] = useState(null)
+  const enrollmentUndoTimerRef = useRef(null)
 
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [confirmState, setConfirmState] = useState(null)
-  const [notification, setNotification] = useState("")
 
   const [enrolledIds, setEnrolledIds] = useState(() =>
     initialUser ? loadUserBucket(initialUser.id, "enrolled", []) : [],
   )
   const [events, setEvents] = useState(() =>
-    initialUser ? loadUserBucket(initialUser.id, "events", defaultEvents) : defaultEvents,
+    initialUser
+      ? loadUserBucket(initialUser.id, "events", defaultEvents).map(normalizeEventEntry)
+      : defaultEvents.map(normalizeEventEntry),
   )
   const [settings, setSettings] = useState(() =>
-    initialUser ? loadUserBucket(initialUser.id, "settings", defaultSettings) : defaultSettings,
+    initialUser
+      ? mergeSettingsWithDefaults(loadUserBucket(initialUser.id, "settings", {}))
+      : { ...defaultSettings },
   )
   const [profile, setProfile] = useState(() =>
     initialUser
-      ? loadUserBucket(initialUser.id, "profile", {
-          name: initialUser.name,
-          email: initialUser.email,
-        })
-      : { name: "", email: "" },
+      ? (() => {
+          const raw = loadUserBucket(initialUser.id, "profile", null)
+          if (raw && raw.emailLocal) {
+            return { name: raw.name, emailLocal: raw.emailLocal, avatarDataUrl: raw.avatarDataUrl || "" }
+          }
+          if (raw && raw.email) {
+            return {
+              name: raw.name,
+              emailLocal: String(raw.email).split("@")[0] || "student",
+              avatarDataUrl: raw.avatarDataUrl || "",
+            }
+          }
+          return defaultProfileFromUser(initialUser)
+        })()
+      : { name: "", emailLocal: "", avatarDataUrl: "" },
   )
   const [plans, setPlans] = useState(() =>
-    initialUser
-      ? loadUserBucket(initialUser.id, "plans", [{ id: "plan-main", name: "Main Draft", courseIds: [] }])
-      : [{ id: "plan-main", name: "Main Draft", courseIds: [] }],
+    initialUser ? loadUserBucket(initialUser.id, "plans", []) : [],
   )
-  const [activePlanId, setActivePlanId] = useState(() =>
-    initialUser
-      ? (loadUserBucket(initialUser.id, "plans", [{ id: "plan-main", name: "Main Draft", courseIds: [] }])[0]?.id ??
-        "plan-main")
-      : "plan-main",
+  const [activePlanId, setActivePlanId] = useState(() => {
+    if (!initialUser) {
+      return null
+    }
+    const loaded = loadUserBucket(initialUser.id, "plans", [])
+    return loaded[0]?.id ?? null
+  })
+
+  const [lastSavedPlansJson, setLastSavedPlansJson] = useState(() =>
+    initialUser ? JSON.stringify(loadUserBucket(initialUser.id, "plans", [])) : "[]",
   )
+  const [eventModal, setEventModal] = useState(null)
+  const [planPickerOpen, setPlanPickerOpen] = useState(false)
+  const [uniRequest, setUniRequest] = useState(null)
+  const [uniRequestNote, setUniRequestNote] = useState("")
 
   const [eventForm, setEventForm] = useState({
     title: "",
-    days: ["Monday"],
+    details: "",
+    days: /** @type {string[]} */ (["Monday"]),
     start: "13:00",
     end: "14:00",
+    color: EVENT_COLOR_PRESETS[0],
+    useCustomColor: false,
   })
 
   const popupRef = useRef(null)
+  const keyboardLayerRef = useRef({})
 
   const currentUser = useMemo(
     () => mockUsers.find((entry) => entry.id === session?.userId) || null,
     [session],
   )
 
+  const classYear = currentUser?.classYear ?? 1
+
+  const plansDirty = useMemo(
+    () => JSON.stringify(plans) !== lastSavedPlansJson,
+    [plans, lastSavedPlansJson],
+  )
+
+  const goToView = useCallback(
+    (view) => {
+      if (activeView === "planning" && view !== "planning" && plansDirty) {
+        // eslint-disable-next-line no-alert
+        if (!window.confirm("You have unsaved plan changes. Leave the Planning page?")) {
+          return
+        }
+      }
+      setActiveView(view)
+    },
+    [activeView, plansDirty],
+  )
+
   const hydrateUserState = (user) => {
     const nextEnrolled = loadUserBucket(user.id, "enrolled", [])
-    const nextEvents = loadUserBucket(user.id, "events", defaultEvents)
-    const nextSettings = loadUserBucket(user.id, "settings", defaultSettings)
-    const nextProfile = loadUserBucket(user.id, "profile", { name: user.name, email: user.email })
-    const nextPlans = loadUserBucket(user.id, "plans", [
-      { id: "plan-main", name: "Main Draft", courseIds: [] },
-    ])
+    const nextEvents = loadUserBucket(user.id, "events", defaultEvents).map(normalizeEventEntry)
+    const nextSettings = mergeSettingsWithDefaults(loadUserBucket(user.id, "settings", {}))
+    const rawProfile = loadUserBucket(user.id, "profile", null)
+    const nextProfile = rawProfile?.emailLocal
+      ? { name: rawProfile.name, emailLocal: rawProfile.emailLocal, avatarDataUrl: rawProfile.avatarDataUrl || "" }
+      : rawProfile?.email
+        ? {
+            name: rawProfile.name,
+            emailLocal: String(rawProfile.email).split("@")[0] || "student",
+            avatarDataUrl: rawProfile.avatarDataUrl || "",
+          }
+        : defaultProfileFromUser(user)
+    const nextPlans = loadUserBucket(user.id, "plans", [])
 
     setEnrolledIds(nextEnrolled)
     setEvents(nextEvents)
     setSettings(nextSettings)
     setProfile(nextProfile)
     setPlans(nextPlans)
-    setActivePlanId(nextPlans[0]?.id || "plan-main")
+    setLastSavedPlansJson(JSON.stringify(nextPlans))
+    setActivePlanId(nextPlans[0]?.id ?? null)
   }
 
   useEffect(() => {
@@ -292,6 +426,119 @@ function App() {
     }
     saveUserBucket(currentUser.id, "settings", settings)
   }, [currentUser, settings])
+
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return false
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  })
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const handler = () => setPrefersReducedMotion(mq.matches)
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
+  }, [])
+
+  const reduceMotionActive = prefersReducedMotion || settings.reduceInterfaceMotion
+  useEffect(() => {
+    document.documentElement.classList.toggle("reduce-motion", reduceMotionActive)
+  }, [reduceMotionActive])
+
+  const clearEnrollmentUndo = useCallback(() => {
+    if (enrollmentUndoTimerRef.current) {
+      clearTimeout(enrollmentUndoTimerRef.current)
+      enrollmentUndoTimerRef.current = null
+    }
+    setEnrollmentUndoCourse(null)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("high-contrast", Boolean(settings.highContrast))
+    return () => {
+      document.documentElement.classList.remove("high-contrast")
+    }
+  }, [settings.highContrast])
+
+  useEffect(() => {
+    if (!enrollmentUndoCourse) {
+      return
+    }
+    if (enrolledIds.includes(enrollmentUndoCourse.id)) {
+      clearEnrollmentUndo()
+    }
+  }, [enrolledIds, enrollmentUndoCourse, clearEnrollmentUndo])
+
+  keyboardLayerRef.current = {
+    helpOpen,
+    eventModal,
+    planPickerOpen,
+    uniRequest,
+    selectedCourse,
+    confirmState,
+  }
+
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+    const onKey = (e) => {
+      const s = keyboardLayerRef.current
+      if (e.key === "Escape") {
+        if (s.helpOpen) {
+          e.preventDefault()
+          setHelpOpen(false)
+          return
+        }
+        if (s.eventModal) {
+          e.preventDefault()
+          setEventModal(null)
+          return
+        }
+        if (s.planPickerOpen) {
+          e.preventDefault()
+          setPlanPickerOpen(false)
+          return
+        }
+        if (s.uniRequest) {
+          e.preventDefault()
+          setUniRequest(null)
+          setUniRequestNote("")
+          return
+        }
+        if (s.selectedCourse) {
+          e.preventDefault()
+          setSelectedCourse(null)
+          return
+        }
+        if (s.confirmState) {
+          e.preventDefault()
+          setConfirmState(null)
+        }
+        return
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        return
+      }
+      if (e.repeat) {
+        return
+      }
+      if (!isHelpHotkey(e)) {
+        return
+      }
+      if (isFormTypingTarget(document.activeElement)) {
+        return
+      }
+      e.preventDefault()
+      setHelpOpen((o) => !o)
+    }
+    window.addEventListener("keydown", onKey, { capture: true })
+    return () => window.removeEventListener("keydown", onKey, { capture: true })
+  }, [session])
 
   useEffect(() => {
     if (!currentUser) {
@@ -321,10 +568,18 @@ function App() {
     if (!currentUser) {
       return []
     }
-    return getRecommendations(courses, enrolledCourses, currentUser.programs).slice(0, 6)
-  }, [currentUser, enrolledCourses])
+    return getYearAwareRecommendations(
+      courses,
+      enrolledCourses,
+      currentUser.programs,
+      classYear,
+    ).slice(0, 8)
+  }, [currentUser, enrolledCourses, classYear])
 
   const availableCourses = useMemo(() => {
+    if (!currentUser) {
+      return []
+    }
     return courses.filter((course) => {
       const textHit = `${course.id} ${course.title} ${course.professor}`
         .toLowerCase()
@@ -334,15 +589,45 @@ function App() {
         seatFilter === "all" ||
         (seatFilter === "open" && course.seatsAvailable > 0) ||
         (seatFilter === "waitlist" && course.seatsAvailable === 0 && course.waitlistOpen)
-
+      if (
+        programOnly &&
+        getCourseDegreeMatches(course.id, currentUser.programs).length === 0
+      ) {
+        return false
+      }
       return textHit && departmentHit && seatHit
     })
-  }, [searchText, departmentFilter, seatFilter])
+  }, [searchText, departmentFilter, seatFilter, programOnly, currentUser])
+
+  const sortedAvailableCourses = useMemo(
+    () =>
+      [...availableCourses].sort((a, b) =>
+        a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+    [availableCourses],
+  )
+
+  const availableCatalogCredits = useMemo(
+    () => sortedAvailableCourses.reduce((sum, c) => sum + c.credits, 0),
+    [sortedAvailableCourses],
+  )
 
   const activePlan = useMemo(
-    () => plans.find((plan) => plan.id === activePlanId) || plans[0],
+    () => plans.find((plan) => plan.id === activePlanId) || null,
     [plans, activePlanId],
   )
+
+  useEffect(() => {
+    if (plans.length === 0) {
+      if (activePlanId !== null) {
+        setActivePlanId(null)
+      }
+      return
+    }
+    if (!plans.some((p) => p.id === activePlanId)) {
+      setActivePlanId(plans[0].id)
+    }
+  }, [plans, activePlanId])
 
   const plannedCourses = useMemo(() => {
     if (!activePlan) {
@@ -351,59 +636,118 @@ function App() {
     return courses.filter((course) => activePlan.courseIds.includes(course.id))
   }, [activePlan])
 
-  const scheduleByDay = useMemo(
-    () => groupScheduleByDay(enrolledCourses, events),
+  const plannedCredits = useMemo(
+    () => plannedCourses.reduce((sum, c) => sum + c.credits, 0),
+    [plannedCourses],
+  )
+
+  const dashboardBlocks = useMemo(
+    () => buildTimeGridBlocks({ enrolledCourses, events, plannedOnly: [] }),
     [enrolledCourses, events],
   )
 
+  const planningCalendarBlocks = useMemo(() => {
+    if (!activePlan) {
+      return buildTimeGridBlocks({ enrolledCourses, events, plannedOnly: [] })
+    }
+    const enr = new Set(enrolledIds)
+    const plannedOnly = plannedCourses.filter((c) => !enr.has(c.id))
+    return buildTimeGridBlocks({ enrolledCourses, events, plannedOnly })
+  }, [enrolledCourses, events, activePlan, plannedCourses, enrolledIds])
+
+  const dashboardViewWindow = useMemo(
+    () => getViewWindowFromBlocks(dashboardBlocks, settings.compactCalendar),
+    [dashboardBlocks, settings.compactCalendar],
+  )
+  const planningViewWindow = useMemo(
+    () => getViewWindowFromBlocks(planningCalendarBlocks, settings.compactCalendar),
+    [planningCalendarBlocks, settings.compactCalendar],
+  )
+
   useEffect(() => {
-    if (!popupRef.current || popupRef.current.closed || !currentUser) {
+    const pop = popupRef.current
+    if (!pop || pop.closed || !currentUser) {
       return
     }
+    const html = popoutHtmlForGrid(
+      currentUser.name,
+      dashboardBlocks,
+      scheduleColumnDays,
+      dashboardViewWindow.viewStartMin,
+      dashboardViewWindow.viewEndMin,
+    )
+    pop.document.open()
+    pop.document.write(html)
+    pop.document.close()
+  }, [dashboardBlocks, currentUser, dashboardViewWindow, settings.compactCalendar])
 
-    const rows = weekDays
-      .map((day) => {
-        const items = scheduleByDay[day]
-          .map((item) => `<li><strong>${item.start}-${item.end}</strong> ${item.title}</li>`)
-          .join("")
-        return `<section><h3>${day}</h3><ul>${items || "<li>No items</li>"}</ul></section>`
-      })
-      .join("")
-
-    popupRef.current.document.body.innerHTML = `
-      <main style="font-family: Arial, sans-serif; padding: 16px; background: #f4faf4; color: #14361e;">
-        <h1>Easy Enroll Calendar - ${currentUser.name}</h1>
-        <p>Synced read-only pop-out view.</p>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">${rows}</div>
-      </main>
-    `
-  }, [scheduleByDay, currentUser])
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (plansDirty && activeView === "planning") {
+        e.preventDefault()
+        e.returnValue = ""
+      }
+    }
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => window.removeEventListener("beforeunload", onBeforeUnload)
+  }, [plansDirty, activeView])
 
   const clearFilters = () => {
     setSearchText("")
     setDepartmentFilter("All")
     setSeatFilter("all")
+    setProgramOnly(false)
+  }
+
+  const applyFilterPreset = (preset) => {
+    if (preset === "all") {
+      clearFilters()
+      return
+    }
+    if (preset === "open") {
+      setSeatFilter("open")
+      setProgramOnly(false)
+    }
+    if (preset === "programs") {
+      setProgramOnly(true)
+      setSeatFilter("all")
+    }
+  }
+
+  const downloadEnrollmentWeekIcs = () => {
+    if (!currentUser) {
+      return
+    }
+    const ics = buildWeekScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name}`)
+    if (!ics) {
+      pushToast("error", "Nothing on your calendar to export yet.")
+      return
+    }
+    downloadIcsFile(ics, "easyenroll-week.ics")
+    pushToast("success", "Downloaded a weekly schedule file (.ics). Open it in your phone or desktop calendar.")
   }
 
   const addCourseToEnrollment = (course, options = { ignoreEventConflicts: false }) => {
     if (enrolledIds.includes(course.id)) {
-      setNotification(`${course.id} is already enrolled.`)
+      pushToast("error", `${course.id} is already in your schedule.`)
       return { added: false, reason: "duplicate" }
     }
 
     if (course.seatsAvailable === 0 && !course.waitlistOpen) {
-      setNotification(`${course.id} cannot be added because no seats or waitlist are available.`)
+      pushToast("error", `${course.id} has no open seats and the waitlist is closed.`)
       return { added: false, reason: "seat_rule" }
     }
 
     if (enrolledCredits + course.credits > MAX_CREDITS) {
-      setNotification(`Adding ${course.id} exceeds the ${MAX_CREDITS} credit limit.`)
+      pushToast("error", `Adding ${course.id} would go over the ${MAX_CREDITS} credit cap.`)
       return { added: false, reason: "credit_limit" }
     }
 
     const courseConflict = hasCourseConflict(course, enrolledCourses)
     if (courseConflict) {
-      setNotification(`${course.id} conflicts with ${courseConflict.id} and cannot be added.`)
+      if (settings.showConflictAlerts) {
+        pushToast("error", `${course.id} overlaps with ${courseConflict.id} on your schedule.`)
+      }
       return { added: false, reason: "course_conflict" }
     }
 
@@ -422,7 +766,7 @@ function App() {
     }
 
     setEnrolledIds((prev) => [...prev, course.id])
-    setNotification(`${course.id} was added successfully.`)
+    pushToast("success", `${course.id} was added to your enrollment.`)
     return { added: true }
   }
 
@@ -433,37 +777,86 @@ function App() {
       message: `Remove ${course.id} from enrolled classes?`,
       onConfirm: () => {
         setEnrolledIds((prev) => prev.filter((id) => id !== course.id))
-        setNotification(`${course.id} was removed.`)
         setConfirmState(null)
+        if (enrollmentUndoTimerRef.current) {
+          clearTimeout(enrollmentUndoTimerRef.current)
+        }
+        setEnrollmentUndoCourse(course)
+        enrollmentUndoTimerRef.current = setTimeout(() => {
+          enrollmentUndoTimerRef.current = null
+          setEnrollmentUndoCourse(null)
+        }, 5000)
+        pushToast("success", `${course.id} was removed. You can undo for a few seconds.`)
       },
     })
   }
 
-  const createEvent = () => {
+  const saveEventFromForm = (mode, editId) => {
     if (!eventForm.title.trim()) {
-      setNotification("Event title is required.")
+      pushToast("error", "Event name is required.")
       return
     }
     if (eventForm.days.length === 0) {
-      setNotification("Select at least one day for the event.")
+      pushToast("error", "Select at least one day for the event.")
       return
     }
-    setEvents((prev) => [
-      ...prev,
-      {
-        id: `ev-${Date.now()}`,
-        title: eventForm.title.trim(),
-        days: eventForm.days,
-        start: eventForm.start,
-        end: eventForm.end,
-      },
-    ])
-    setEventForm({ title: "", days: ["Monday"], start: "13:00", end: "14:00" })
-    setNotification("Event added to calendar.")
+    const color =
+      eventForm.useCustomColor && eventForm.color ? eventForm.color : eventForm.color || EVENT_COLOR_PRESETS[0]
+    if (mode === "add") {
+      setEvents((prev) => [
+        ...prev,
+        normalizeEventEntry({
+          id: `ev-${Date.now()}`,
+          title: eventForm.title.trim(),
+          description: eventForm.details.trim(),
+          days: eventForm.days,
+          start: eventForm.start,
+          end: eventForm.end,
+          color,
+        }),
+      ])
+      if (settings.showReminderAlerts) {
+        pushToast("success", "Event added to your calendar.")
+      }
+    } else if (editId) {
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === editId
+            ? normalizeEventEntry({
+                ...ev,
+                title: eventForm.title.trim(),
+                description: eventForm.details.trim(),
+                days: eventForm.days,
+                start: eventForm.start,
+                end: eventForm.end,
+                color,
+              })
+            : ev,
+        ),
+      )
+      if (settings.showReminderAlerts) {
+        pushToast("success", "Event updated.")
+      }
+    }
+    setEventModal(null)
+    setEventForm({
+      title: "",
+      details: "",
+      days: ["Monday"],
+      start: "13:00",
+      end: "14:00",
+      color: EVENT_COLOR_PRESETS[0],
+      useCustomColor: false,
+    })
   }
 
-  const deleteEvent = (eventId) => {
+  const removeEventById = (eventId) => {
+    const ev = events.find((e) => e.id === eventId)
     setEvents((prev) => prev.filter((event) => event.id !== eventId))
+    setEventModal(null)
+    if (settings.showReminderAlerts) {
+      pushToast("success", ev ? `"${ev.title}" removed from your calendar.` : "Event removed from your calendar.")
+    }
   }
 
   const onDropToEnroll = (event) => {
@@ -477,11 +870,28 @@ function App() {
 
   const addToPlan = (course) => {
     if (!activePlan) {
+      pushToast("error", "Select or create a plan first.")
       return
     }
     if (activePlan.courseIds.includes(course.id)) {
-      setNotification(`${course.id} is already in this mock plan.`)
+      pushToast("error", `${course.id} is already in this plan.`)
       return
+    }
+
+    const other = plannedCourses
+    const classHit = hasCourseConflict(course, other)
+    const evHits = getEventConflicts(course, events)
+    if (classHit || evHits.length > 0) {
+      const parts = []
+      if (classHit) {
+        parts.push(`overlaps with ${classHit.id}`)
+      }
+      if (evHits.length > 0) {
+        parts.push(`overlaps with ${evHits.map((e) => `"${e.title}"`).join(", ")}`)
+      }
+      if (settings.showConflictAlerts) {
+        pushToast("error", `${course.id} conflicts with your schedule: ${parts.join(" and ")}.`)
+      }
     }
 
     setPlans((prev) =>
@@ -513,16 +923,17 @@ function App() {
     }
   }
 
-  const createPlan = () => {
-    const planName = `Draft ${plans.length + 1}`
+  const createPlan = (name) => {
+    const planName = (name && name.trim()) || `Plan ${plans.length + 1}`
     const newPlan = { id: `plan-${Date.now()}`, name: planName, courseIds: [] }
     setPlans((prev) => [...prev, newPlan])
     setActivePlanId(newPlan.id)
+    pushToast("success", `Created "${planName}". Add courses in the studio.`)
   }
 
   const importPlanToEnrollment = () => {
     if (!activePlan || activePlan.courseIds.length === 0) {
-      setNotification("No courses in selected plan.")
+      pushToast("error", "No courses in the selected plan to import.")
       return
     }
 
@@ -567,18 +978,46 @@ function App() {
 
     setEnrolledIds(workingIds)
 
+    if (addedCount > 0) {
+      pushToast(
+        "success",
+        skipped.length === 0
+          ? `Imported ${addedCount} course(s) into your enrollment.`
+          : `Imported ${addedCount} course(s). Some were skipped (see summary).`,
+      )
+    } else {
+      pushToast("error", "No courses could be imported. Check seats, credits, and conflicts.")
+    }
+
     setConfirmState({
       type: "summary",
       title: "Import Complete",
       message:
         skipped.length === 0
-          ? `Imported all classes. ${addedCount} classes enrolled.`
-          : `Imported ${addedCount} classes. Skipped: ${skipped.join("; ")}`,
+          ? `Enrolled in ${addedCount} class(es).`
+          : `Enrolled in ${addedCount} class(es). Skipped: ${skipped.join("; ")}`,
       onConfirm: () => setConfirmState(null),
     })
   }
 
+  const savePlansSnapshot = () => {
+    setLastSavedPlansJson(JSON.stringify(plans))
+    pushToast("success", "Plan changes saved locally.")
+  }
+
   const planningConflicts = useMemo(() => detectPlanConflicts(plannedCourses, events), [plannedCourses, events])
+
+  const toggleEventDay = (day) => {
+    setEventForm((prev) => {
+      const has = prev.days.includes(day)
+      const next = has ? prev.days.filter((d) => d !== day) : [...prev.days, day]
+      const order = (d) => scheduleColumnDays.indexOf(d)
+      if (next.length === 0) {
+        return { ...prev, days: [day] }
+      }
+      return { ...prev, days: next.sort((a, b) => order(a) - order(b)) }
+    })
+  }
 
   const handlePasswordLogin = () => {
     const user = loginWithPassword(localEmail, localPassword)
@@ -607,24 +1046,45 @@ function App() {
   }
 
   const handleLogout = () => {
+    if (enrollmentUndoTimerRef.current) {
+      clearTimeout(enrollmentUndoTimerRef.current)
+      enrollmentUndoTimerRef.current = null
+    }
+    setEnrollmentUndoCourse(null)
     clearAuthSession()
     setSession(null)
     setEnrolledIds([])
-    setEvents(defaultEvents)
+    setEvents(defaultEvents.map(normalizeEventEntry))
     setSettings(defaultSettings)
-    setProfile({ name: "", email: "" })
-    setPlans([{ id: "plan-main", name: "Main Draft", courseIds: [] }])
-    setActivePlanId("plan-main")
+    setProfile({ name: "", emailLocal: "", avatarDataUrl: "" })
+    setPlans([])
+    setActivePlanId(null)
+    setLastSavedPlansJson("[]")
     setActiveView("dashboard")
-    setNotification("")
+    setHelpOpen(false)
   }
 
   const openCalendarPopout = () => {
-    const popup = window.open("", "easy-enroll-calendar", "width=960,height=720")
-    if (popup) {
-      popupRef.current = popup
-      setNotification("Calendar pop-out opened.")
+    if (!currentUser) {
+      return
     }
+    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=800")
+    if (!popup) {
+      pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
+      return
+    }
+    popupRef.current = popup
+    const html = popoutHtmlForGrid(
+      currentUser.name,
+      dashboardBlocks,
+      scheduleColumnDays,
+      dashboardViewWindow.viewStartMin,
+      dashboardViewWindow.viewEndMin,
+    )
+    popup.document.open()
+    popup.document.write(html)
+    popup.document.close()
+    pushToast("success", "Calendar pop-out opened.")
   }
 
   if (!session || !currentUser) {
@@ -648,37 +1108,53 @@ function App() {
       <header className="app-topbar">
         <div>
           <h1>Easy Enroll</h1>
-          <p>{profile.name || currentUser.name} | {profile.email || currentUser.email}</p>
+          <p className="app-wayfinding muted">{VIEW_WAYFINDING[activeView]}</p>
+          <p>
+            {profile.name || currentUser.name} | {profile.emailLocal || "student"}
+            {SCHOOL_EMAIL_DOMAIN}
+          </p>
           <p className="muted">Programs: {getProgramNames(currentUser.programs).join("; ")}</p>
         </div>
         <nav className="nav-row">
           <button
             className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
             type="button"
-            onClick={() => setActiveView("dashboard")}
+            onClick={() => goToView("dashboard")}
           >
             Enrollment
           </button>
           <button
             className={`btn ${activeView === "planning" ? "btn--primary" : "btn--subtle"}`}
             type="button"
-            onClick={() => setActiveView("planning")}
+            onClick={() => goToView("planning")}
           >
             Planning
           </button>
           <button
             className={`btn ${activeView === "profile" ? "btn--primary" : "btn--subtle"}`}
             type="button"
-            onClick={() => setActiveView("profile")}
+            onClick={() => goToView("profile")}
           >
             Profile
           </button>
           <button
             className={`btn ${activeView === "settings" ? "btn--primary" : "btn--subtle"}`}
             type="button"
-            onClick={() => setActiveView("settings")}
+            onClick={() => goToView("settings")}
           >
             Settings
+          </button>
+          <button
+            className="btn btn--subtle"
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            title="Open tips (? or Shift+/ on US QWERTY when not in a text field)"
+          >
+            Help
+            <span className="help-key-hint" aria-hidden>
+              {" "}
+              (?)
+            </span>
           </button>
           <button className="btn btn--danger" type="button" onClick={handleLogout}>
             Logout
@@ -686,12 +1162,31 @@ function App() {
         </nav>
       </header>
 
-      {notification && <p className="notice">{notification}</p>}
+      <ToastContainer />
+
+      {enrollmentUndoCourse && (
+        <div className="enrollment-undo-bar" role="status" aria-live="polite">
+          <span>
+            Removed <strong>{enrollmentUndoCourse.id}</strong> from this term. Undo within a few seconds.
+          </span>
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={() => {
+              const c = enrollmentUndoCourse
+              clearEnrollmentUndo()
+              addCourseToEnrollment(c)
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       {activeView === "dashboard" && (
         <>
           <section className="recommendation-panel">
-            <h2>Recommended For Next Semester</h2>
+            <h2>Recommended (next semester — year {classYear} focus)</h2>
             <div className="recommendation-grid">
               {recommendations.map((item) => (
                 <button key={item.course.id} className="recommendation" onClick={() => addCourseToEnrollment(item.course)}>
@@ -728,6 +1223,46 @@ function App() {
             </button>
           </section>
 
+          <div className="filter-preset-bar" role="group" aria-label="Quick filter presets">
+            <span className="filter-preset-bar__label muted">Presets</span>
+            <button
+              className="btn btn--chip"
+              type="button"
+              aria-pressed={
+                !programOnly && seatFilter === "all" && !searchText && departmentFilter === "All"
+              }
+              onClick={() => applyFilterPreset("all")}
+            >
+              All courses
+            </button>
+            <button
+              className={`btn btn--chip${seatFilter === "open" && !programOnly ? " btn--chip-on" : ""}`}
+              type="button"
+              aria-pressed={seatFilter === "open" && !programOnly}
+              onClick={() => applyFilterPreset("open")}
+            >
+              Open seats
+            </button>
+            <button
+              className={`btn btn--chip${programOnly ? " btn--chip-on" : ""}`}
+              type="button"
+              aria-pressed={programOnly}
+              onClick={() => applyFilterPreset("programs")}
+            >
+              My programs
+            </button>
+          </div>
+
+          <div className="enrollment-summary" aria-live="polite">
+            <span>
+              <strong>Enrolled:</strong> {enrolledCredits} / {MAX_CREDITS} credits
+            </span>
+            <span>
+              <strong>Catalog (filtered):</strong> {sortedAvailableCourses.length} course
+              {sortedAvailableCourses.length === 1 ? "" : "s"} · {availableCatalogCredits} credits
+            </span>
+          </div>
+
           <section className="pane-grid">
             <article className="pane">
               <header>
@@ -735,7 +1270,16 @@ function App() {
                 <p>Click for details. Drag to enroll.</p>
               </header>
               <div className="scroll-list">
-                {availableCourses.map((course) => (
+                {sortedAvailableCourses.length === 0 && (
+                  <p className="muted" role="status">
+                    No courses match your filters. Try{" "}
+                    <button className="btn btn--link" type="button" onClick={clearFilters}>
+                      clearing filters
+                    </button>{" "}
+                    or changing department and seat options.
+                  </p>
+                )}
+                {sortedAvailableCourses.map((course) => (
                   <CourseCard
                     key={course.id}
                     course={course}
@@ -744,9 +1288,6 @@ function App() {
                     onAdd={addCourseToEnrollment}
                     addLabel="Add"
                     draggable
-                    onDragStart={(event, courseId) => {
-                      event.dataTransfer.setData("text/plain", courseId)
-                    }}
                   />
                 ))}
               </div>
@@ -781,178 +1322,400 @@ function App() {
 
           <section className="calendar-section">
             <header className="calendar-header">
-              <h2>Weekly Calendar</h2>
-              <button className="btn btn--secondary" type="button" onClick={openCalendarPopout}>
-                Open Pop-out Calendar
-              </button>
-            </header>
-
-            <div className={`calendar-grid ${settings.compactCalendar ? "calendar-grid--compact" : ""}`}>
-              {weekDays.map((day) => (
-                <article className="calendar-day" key={day}>
-                  <h3>{day}</h3>
-                  <ul>
-                    {scheduleByDay[day].length === 0 && <li className="muted">No items</li>}
-                    {scheduleByDay[day].map((item) => (
-                      <li key={item.id} className={`calendar-item calendar-item--${item.kind}`}>
-                        <strong>
-                          {item.start}-{item.end}
-                        </strong>
-                        <span>{item.title}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              ))}
-            </div>
-
-            <section className="event-editor">
-              <h3>Add Weekly Event</h3>
-              <div className="event-editor__grid">
-                <input
-                  type="text"
-                  value={eventForm.title}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, title: event.target.value }))}
-                  placeholder="Event title"
-                />
-                <input
-                  type="time"
-                  value={eventForm.start}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, start: event.target.value }))}
-                />
-                <input
-                  type="time"
-                  value={eventForm.end}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, end: event.target.value }))}
-                />
-                <select
-                  value={eventForm.days[0]}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, days: [event.target.value] }))}
+              <h2>Weekly calendar</h2>
+              <div className="calendar-header__actions">
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => {
+                    setEventForm({
+                      title: "",
+                      details: "",
+                      days: ["Monday"],
+                      start: "13:00",
+                      end: "14:00",
+                      color: EVENT_COLOR_PRESETS[0],
+                      useCustomColor: false,
+                    })
+                    setEventModal({ mode: "add" })
+                  }}
                 >
-                  {weekDays.map((day) => (
-                    <option key={day} value={day}>
-                      {day}
-                    </option>
-                  ))}
-                </select>
-                <button className="btn btn--primary" type="button" onClick={createEvent}>
-                  Add Event
+                  Add weekly event
+                </button>
+                <button className="btn btn--secondary" type="button" onClick={openCalendarPopout}>
+                  Open pop-out calendar
+                </button>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={downloadEnrollmentWeekIcs}
+                  title="Download .ics for Apple, Google, or Outlook"
+                >
+                  Download week (.ics)
                 </button>
               </div>
-              <ul className="event-list">
-                {events.map((event) => (
-                  <li key={event.id}>
-                    <span>
-                      {event.title} | {event.days.join(", ")} | {event.start}-{event.end}
-                    </span>
-                    <button className="btn btn--subtle" type="button" onClick={() => deleteEvent(event.id)}>
-                      Delete
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            </header>
+            <p className="muted calendar-hint">
+              Enrolled courses use solid colors. Click a block for course details or to edit a personal event.
+            </p>
+            <TimeGridCalendar
+              blocks={dashboardBlocks}
+              days={scheduleColumnDays}
+              viewStartMin={dashboardViewWindow.viewStartMin}
+              viewEndMin={dashboardViewWindow.viewEndMin}
+              initialScrollHour={0}
+              onBlockClick={(block) => {
+                if (block.data.type === "course") {
+                  setSelectedCourse(block.data.course)
+                } else {
+                  const ev = block.data.event
+                  setEventForm({
+                    title: ev.title,
+                    details: ev.description || "",
+                    days: [...ev.days],
+                    start: ev.start,
+                    end: ev.end,
+                    color: ev.color || "#2f6fcb",
+                    useCustomColor: true,
+                  })
+                  setEventModal({ mode: "edit", id: ev.id })
+                }
+              }}
+            />
           </section>
         </>
       )}
 
       {activeView === "planning" && (
         <section className="planning-section">
-          <header className="planning-header">
-            <h2>Planning Studio (Mock Schedule)</h2>
-            <p>Conflicts are allowed here for test planning.</p>
-            <div className="planning-tools">
-              <select value={activePlan?.id || ""} onChange={(event) => setActivePlanId(event.target.value)}>
-                {plans.map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.name}
-                  </option>
-                ))}
-              </select>
-              <button className="btn btn--subtle" type="button" onClick={createPlan}>
-                New Plan
-              </button>
-              <button className="btn btn--primary" type="button" onClick={importPlanToEnrollment}>
-                Import Plan To Enrollment
+          {plans.length === 0 ? (
+            <div className="planning-empty">
+              <h2>No plans yet</h2>
+              <p>Create a plan to use the planning studio, then add courses and compare them to your current enrollment.</p>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  // eslint-disable-next-line no-alert
+                  const n = window.prompt("Plan name?", "My plan")
+                  if (n !== null) {
+                    createPlan(n)
+                  }
+                }}
+              >
+                Create your first plan
               </button>
             </div>
-          </header>
-
-          <div className="pane-grid">
-            <article className="pane">
-              <h3>Available Courses</h3>
-              <div className="scroll-list">
-                {availableCourses.map((course) => (
-                  <CourseCard
-                    key={`${course.id}-planner`}
-                    course={course}
-                    degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
-                    onOpen={setSelectedCourse}
-                    onAdd={addToPlan}
-                    addLabel="Add To Plan"
-                    actionVariant="secondary"
-                    draggable
-                    onDragStart={(event, courseId) => {
-                      event.dataTransfer.setData("text/plain", courseId)
+          ) : (
+            <>
+              <header className="planning-header">
+                <div>
+                  <h2>Planning studio</h2>
+                  <p className="muted">
+                    Enrolled classes are solid. Plan-only classes use diagonal striping. Conflicts are allowed; we warn you
+                    with a toast and list them below.
+                  </p>
+                </div>
+                <div className="planning-tools">
+                  <span className="planning-active-label">
+                    Active: <strong>{activePlan?.name || "—"}</strong>
+                  </span>
+                  <button className="btn btn--subtle" type="button" onClick={() => setPlanPickerOpen(true)}>
+                    Select plan…
+                  </button>
+                  <button
+                    className="btn btn--subtle"
+                    type="button"
+                    onClick={() => {
+                      // eslint-disable-next-line no-alert
+                      const n = window.prompt("New plan name?", `Plan ${plans.length + 1}`)
+                      if (n !== null) {
+                        createPlan(n)
+                      }
                     }}
-                  />
-                ))}
-              </div>
-            </article>
+                  >
+                    New plan
+                  </button>
+                </div>
+              </header>
 
-            <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToPlan}>
-              <h3>Plan Courses</h3>
-              <div className="scroll-list">
-                {plannedCourses.map((course) => (
-                  <CourseCard
-                    key={`${course.id}-planned`}
-                    course={course}
-                    degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
-                    onOpen={setSelectedCourse}
-                    onAdd={() => removeFromPlan(course.id)}
-                    addLabel="Remove"
-                    actionVariant="danger"
-                  />
-                ))}
+              <div className="planning-calendar-wrap">
+                <h3 className="planning-cal-title">Calendar (enrolled + this plan)</h3>
+                <TimeGridCalendar
+                  blocks={planningCalendarBlocks}
+                  days={scheduleColumnDays}
+                  viewStartMin={planningViewWindow.viewStartMin}
+                  viewEndMin={planningViewWindow.viewEndMin}
+                  initialScrollHour={0}
+                  onBlockClick={(block) => {
+                    if (block.data.type === "course") {
+                      setSelectedCourse(block.data.course)
+                    } else {
+                      const ev = block.data.event
+                      setEventForm({
+                        title: ev.title,
+                        details: ev.description || "",
+                        days: [...ev.days],
+                        start: ev.start,
+                        end: ev.end,
+                        color: ev.color || "#2f6fcb",
+                        useCustomColor: true,
+                      })
+                      setEventModal({ mode: "edit", id: ev.id })
+                    }
+                  }}
+                />
               </div>
-            </article>
-          </div>
 
-          <section className="planning-conflicts">
-            <h3>Planning Conflicts (Allowed)</h3>
-            {planningConflicts.length === 0 && <p className="muted">No conflicts currently in this plan.</p>}
-            <ul>
-              {planningConflicts.map((conflict, index) => (
-                <li key={`${conflict.a}-${conflict.b}-${index}`}>
-                  {conflict.type === "course"
-                    ? `${conflict.a} conflicts with ${conflict.b}`
-                    : `${conflict.a} overlaps with event ${conflict.b}`}
-                </li>
-              ))}
-            </ul>
-          </section>
+              <div className="pane-grid">
+                <article className="pane">
+                  <h3>Available courses</h3>
+                  <div className="scroll-list">
+                    {sortedAvailableCourses.length === 0 && (
+                      <p className="muted" role="status">
+                        No courses match your filters. On Enrollment you can change search, department, and seats — or{" "}
+                        <button className="btn btn--link" type="button" onClick={clearFilters}>
+                          clear filters
+                        </button>
+                        .
+                      </p>
+                    )}
+                    {sortedAvailableCourses.map((course) => (
+                      <CourseCard
+                        key={`${course.id}-planner`}
+                        course={course}
+                        degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
+                        onOpen={setSelectedCourse}
+                        onAdd={addToPlan}
+                        addLabel="Add to plan"
+                        actionVariant="secondary"
+                        draggable
+                      />
+                    ))}
+                  </div>
+                </article>
+
+                <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToPlan}>
+                  <h3>
+                    Plan courses
+                    {activePlan && (
+                      <span className="muted" style={{ fontSize: "0.88rem", fontWeight: 500 }}>
+                        {" "}
+                        — {plannedCredits} planned credits
+                      </span>
+                    )}
+                  </h3>
+                  <div className="scroll-list">
+                    {activePlan && plannedCourses.length === 0 && <p className="muted">Drag or add classes here.</p>}
+                    {plannedCourses.map((course) => (
+                      <CourseCard
+                        key={`${course.id}-planned`}
+                        course={course}
+                        degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
+                        onOpen={setSelectedCourse}
+                        onAdd={() => removeFromPlan(course.id)}
+                        addLabel="Remove"
+                        actionVariant="danger"
+                      />
+                    ))}
+                  </div>
+                </article>
+              </div>
+
+              <section className="planning-conflicts">
+                <h3>Schedule conflicts in this plan</h3>
+                {planningConflicts.length === 0 && <p className="muted">No time overlaps in this plan right now.</p>}
+                <ul>
+                  {planningConflicts.map((conflict, index) => (
+                    <li key={`${conflict.a}-${conflict.b}-${index}`}>
+                      {conflict.type === "course"
+                        ? `Course ${conflict.a} overlaps with course ${conflict.b}`
+                        : `Course ${conflict.a} overlaps with event “${conflict.bTitle || conflict.b}”`}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <footer className="planning-footer-bar">
+                {plansDirty && <span className="planning-unsaved">Unsaved plan changes</span>}
+                <button className="btn btn--subtle" type="button" onClick={savePlansSnapshot}>
+                  Save
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={importPlanToEnrollment}
+                  disabled={!activePlan || activePlan.courseIds.length === 0}
+                >
+                  Import to enrollment
+                </button>
+              </footer>
+            </>
+          )}
+
+          {planPickerOpen && (
+            <Modal
+              title="Select a plan"
+              onClose={() => setPlanPickerOpen(false)}
+              actions={
+                <button className="btn btn--primary" type="button" onClick={() => setPlanPickerOpen(false)}>
+                  Done
+                </button>
+              }
+            >
+              <ul className="plan-card-list">
+                {[...plans]
+                  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+                  .map((plan) => (
+                    <li key={plan.id}>
+                      <div className="plan-card">
+                        <button
+                          className="plan-card__main"
+                          type="button"
+                          onClick={() => {
+                            setActivePlanId(plan.id)
+                            setPlanPickerOpen(false)
+                          }}
+                        >
+                          <div className="plan-card__title">{plan.name}</div>
+                          <div className="plan-card__meta">
+                            {plan.courseIds.length
+                              ? plan.courseIds.map((id) => {
+                                  const c = courses.find((x) => x.id === id)
+                                  const line = c ? `${c.id} — ${c.title}` : id
+                                  return (
+                                    <span
+                                      key={id}
+                                      className="plan-chip plan-chip--rich"
+                                      title={c ? `${c.id}: ${c.title} (${c.credits} cr)` : id}
+                                    >
+                                      {line}
+                                    </span>
+                                  )
+                                })
+                              : "No courses yet"}
+                          </div>
+                        </button>
+                        <div className="plan-card__actions">
+                          <button
+                            className="btn btn--subtle"
+                            type="button"
+                            onClick={() => {
+                              // eslint-disable-next-line no-alert
+                              const n = window.prompt("Rename plan", plan.name)
+                              if (n && n.trim()) {
+                                setPlans((prev) => prev.map((p) => (p.id === plan.id ? { ...p, name: n.trim() } : p)))
+                              }
+                            }}
+                          >
+                            Edit name
+                          </button>
+                          <button
+                            className="btn btn--danger"
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Delete “${plan.name}”?`)) {
+                                setPlans((prev) => {
+                                  const next = prev.filter((p) => p.id !== plan.id)
+                                  if (activePlanId === plan.id) {
+                                    setActivePlanId(next[0]?.id ?? null)
+                                  }
+                                  return next
+                                })
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </Modal>
+          )}
+
         </section>
       )}
 
       {activeView === "profile" && (
         <section className="profile-section">
           <h2>Profile</h2>
-          <p>Update your account profile information for this prototype.</p>
-          <label>
-            Name
-            <input
-              value={profile.name}
-              onChange={(event) => setProfile((prev) => ({ ...prev, name: event.target.value }))}
-            />
-          </label>
-          <label>
-            Email
-            <input
-              value={profile.email}
-              onChange={(event) => setProfile((prev) => ({ ...prev, email: event.target.value }))}
-            />
-          </label>
-          <p className="muted">Password changes are managed by University SSO in this prototype.</p>
+          <p>Identity fields follow university policy. This is a front-end mock only.</p>
+
+          <div className="profile-wide-card">
+            <div className="profile-avatar-block">
+            {profile.avatarDataUrl ? (
+              <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
+            ) : (
+              <div className="profile-avatar profile-avatar--ph" aria-hidden>
+                {(profile.name || currentUser.name)
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </div>
+            )}
+            <label className="profile-file">
+              Update photo
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(ev) => {
+                  const f = ev.target.files?.[0]
+                  if (!f) {
+                    return
+                  }
+                  const r = new FileReader()
+                  r.onload = () => {
+                    setProfile((prev) => ({ ...prev, avatarDataUrl: r.result }))
+                    pushToast("success", "Profile picture updated (stored locally in this browser).")
+                  }
+                  r.readAsDataURL(f)
+                }}
+              />
+            </label>
+            </div>
+
+            <div className="profile-locked">
+            <p>
+              <strong>Display name:</strong> {profile.name || currentUser.name}
+            </p>
+            <p className="muted">Legal name and password are managed by the university directory.</p>
+            <div className="profile-request-row">
+              <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
+                Request name change
+              </button>
+              <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "password" })}>
+                Request password change
+              </button>
+            </div>
+            </div>
+
+            <label>
+            School email
+            <div className="email-split">
+              <input
+                value={profile.emailLocal}
+                onChange={(event) => {
+                  const t = event.target.value.replace(/[^a-zA-Z0-9._-]/g, "")
+                  setProfile((prev) => ({ ...prev, emailLocal: t }))
+                }}
+                type="text"
+                autoComplete="off"
+                placeholder="username"
+                aria-label="Email local part (before @)"
+              />
+              <span className="email-split__domain" aria-hidden>
+                {SCHOOL_EMAIL_DOMAIN}
+              </span>
+            </div>
+            <span className="muted" style={{ fontSize: "0.85rem" }}>
+              You may edit only the part before @; the domain is fixed for university routing.
+            </span>
+            </label>
+          </div>
         </section>
       )}
 
@@ -967,46 +1730,378 @@ function App() {
                 setSettings((prev) => ({ ...prev, compactCalendar: event.target.checked }))
               }
             />
-            Use compact calendar mode
+            Focus week view on your schedule
           </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={settings.showConflictAlerts}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, showConflictAlerts: event.target.checked }))
-              }
-            />
-            Enable conflict alerts
-          </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={settings.showReminderAlerts}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, showReminderAlerts: event.target.checked }))
-              }
-            />
-            Enable reminder alerts
-          </label>
+          <p className="muted settings-hint">
+            Crops the week view to the earliest and latest time on your schedule (courses and personal events) plus one
+            hour of padding, snapped to whole hours. Hides off-hours. Applies to Enrollment, Planning, and the calendar
+            pop-out. If nothing is on the schedule, a default 7:00 a.m.–7:00 p.m. window is used.
+          </p>
+          <details className="settings-advanced">
+            <summary>Alerts, motion, and contrast (show more)</summary>
+            <div className="settings-advanced__body">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showConflictAlerts}
+                  onChange={(event) =>
+                    setSettings((prev) => ({ ...prev, showConflictAlerts: event.target.checked }))
+                  }
+                />
+                Enable conflict alerts
+              </label>
+              <p className="muted settings-hint">
+                When off, schedule-overlap toasts are hidden (enrollment add blocked; planning still allows overlap but
+                won’t toast). The planning conflict list on the page still updates.
+              </p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showReminderAlerts}
+                  onChange={(event) =>
+                    setSettings((prev) => ({ ...prev, showReminderAlerts: event.target.checked }))
+                  }
+                />
+                Enable reminder alerts
+              </label>
+              <p className="muted settings-hint">
+                When off, success toasts for adding, editing, or removing personal weekly events on your calendar are
+                suppressed (actions still apply).
+              </p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.reduceInterfaceMotion}
+                  onChange={(event) =>
+                    setSettings((prev) => ({ ...prev, reduceInterfaceMotion: event.target.checked }))
+                  }
+                />
+                Reduce interface motion (also respects your system’s “reduced motion” when set to off)
+              </label>
+              <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
+                When the OS already requests reduced motion, the calmer experience applies even with this
+                unset.
+              </p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.highContrast}
+                  onChange={(event) =>
+                    setSettings((prev) => ({ ...prev, highContrast: event.target.checked }))
+                  }
+                />
+                High-contrast theme
+              </label>
+              <p className="muted settings-hint">
+                Dark background and bright text for low vision, glare, or a dim room. You can also zoom the browser; we
+                keep controls keyboard-accessible.
+              </p>
+            </div>
+          </details>
+          <p className="muted settings-doc-link">
+            Principles and a living backlog: <code>hci-ui-suggestions.md</code>. Roadmap: <code>tasks.md</code>.
+          </p>
         </section>
       )}
 
-      {selectedCourse && (
-        <Modal title={`${selectedCourse.id} details`} onClose={() => setSelectedCourse(null)}>
-          <p>{selectedCourse.title}</p>
-          <p>{selectedCourse.description}</p>
-          <p>Professor: {selectedCourse.professor}</p>
-          <p>Credits: {selectedCourse.credits}</p>
-          <p>Class Time: {meetingLabel(selectedCourse.meetingTimes)}</p>
-          <p>Exam: {selectedCourse.examTime}</p>
-          <div className="chip-row">
-            {getCourseDegreeMatches(selectedCourse.id, currentUser.programs).map((label) => (
-              <span className="chip" key={label}>
-                {label}
-              </span>
-            ))}
+      {eventModal && (
+        <Modal
+          title={eventModal.mode === "add" ? "Add weekly event" : "Edit event"}
+          onClose={() => setEventModal(null)}
+          actions={
+            <>
+              {eventModal.mode === "edit" && eventModal.id && (
+                <button
+                  className="btn btn--danger"
+                  type="button"
+                  onClick={() => removeEventById(eventModal.id)}
+                >
+                  Remove from calendar
+                </button>
+              )}
+              <button className="btn btn--subtle" type="button" onClick={() => setEventModal(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => saveEventFromForm(eventModal.mode, eventModal.id)}
+              >
+                {eventModal.mode === "add" ? "Add event" : "Save changes"}
+              </button>
+            </>
+          }
+        >
+          <div className="event-modal-grid">
+            <label>
+              Event name
+              <input
+                value={eventForm.title}
+                onChange={(ev) => setEventForm((p) => ({ ...p, title: ev.target.value }))}
+                type="text"
+              />
+            </label>
+            <label>
+              Details
+              <textarea
+                rows={3}
+                value={eventForm.details}
+                onChange={(ev) => setEventForm((p) => ({ ...p, details: ev.target.value }))}
+              />
+            </label>
+            <div className="day-chip-group">
+              <span className="day-chip-label">Days (toggle)</span>
+              <div className="day-chip-row">
+                {scheduleColumnDays.map((day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`day-chip ${eventForm.days.includes(day) ? "day-chip--on" : ""}`}
+                    onClick={() => toggleEventDay(day)}
+                  >
+                    {day.slice(0, 3)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="event-time-row">
+              <label>
+                Start
+                <input
+                  type="time"
+                  value={eventForm.start}
+                  onChange={(ev) => setEventForm((p) => ({ ...p, start: ev.target.value }))}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="time"
+                  value={eventForm.end}
+                  onChange={(ev) => setEventForm((p) => ({ ...p, end: ev.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="color-pick">
+              <span>Color on calendar</span>
+              <div className="color-presets">
+                {EVENT_COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className="color-swatch"
+                    style={{ background: c }}
+                    title={c}
+                    onClick={() => setEventForm((p) => ({ ...p, color: c, useCustomColor: false }))}
+                  />
+                ))}
+              </div>
+              <label className="color-custom">
+                <input
+                  type="checkbox"
+                  checked={eventForm.useCustomColor}
+                  onChange={(ev) => setEventForm((p) => ({ ...p, useCustomColor: ev.target.checked }))}
+                />
+                Custom
+                <input
+                  type="color"
+                  value={eventForm.color?.slice(0, 7) || "#2f6fcb"}
+                  onChange={(ev) => setEventForm((p) => ({ ...p, color: ev.target.value, useCustomColor: true }))}
+                  aria-label="Pick custom event color"
+                />
+              </label>
+              <p className="color-selected-summary">
+                <span className="muted">Selected color: </span>
+                <span className="color-hex-value" aria-live="polite">
+                  {(eventForm.color || "#2f6fcb").toUpperCase()}
+                </span>
+              </p>
+            </div>
           </div>
+        </Modal>
+      )}
+
+      {uniRequest && (
+        <Modal
+          title={uniRequest.type === "name" ? "Request a name change" : "Request a password change"}
+          onClose={() => {
+            setUniRequest(null)
+            setUniRequestNote("")
+          }}
+          actions={
+            <>
+              <button
+                className="btn btn--subtle"
+                type="button"
+                onClick={() => {
+                  setUniRequest(null)
+                  setUniRequestNote("")
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  if (!uniRequestNote.trim()) {
+                    pushToast("error", "Please add a short reason for the request.")
+                    return
+                  }
+                  pushToast(
+                    "success",
+                    "Request recorded (mock). The registrar / IT would email you in a real deployment.",
+                  )
+                  setUniRequest(null)
+                  setUniRequestNote("")
+                }}
+              >
+                Submit
+              </button>
+            </>
+          }
+        >
+          <p>
+            {uniRequest.type === "name"
+              ? "Describe why your legal name should be updated in university records."
+              : "Describe why you need a password change through the University (not in this app)."}
+          </p>
+          <label>
+            Reason
+            <textarea
+              rows={4}
+              value={uniRequestNote}
+              onChange={(ev) => setUniRequestNote(ev.target.value)}
+            />
+          </label>
+        </Modal>
+      )}
+
+      {selectedCourse && (
+        <Modal
+          title="Course details"
+          onClose={() => setSelectedCourse(null)}
+          actions={
+            <>
+              <button className="btn btn--subtle" type="button" onClick={() => setSelectedCourse(null)}>
+                Close
+              </button>
+              {enrolledIds.includes(selectedCourse.id) ? (
+                <button
+                  className="btn btn--danger"
+                  type="button"
+                  onClick={() => {
+                    const c = selectedCourse
+                    setSelectedCourse(null)
+                    removeEnrolledCourse(c)
+                  }}
+                >
+                  Remove from enrollment
+                </button>
+              ) : (
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => {
+                    const c = selectedCourse
+                    const r = addCourseToEnrollment(c)
+                    if (r.added) {
+                      setSelectedCourse(null)
+                    }
+                  }}
+                >
+                  Add to enrollment
+                </button>
+              )}
+            </>
+          }
+        >
+          <div className="course-detail">
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Course code</h4>
+              <p className="course-detail__value">
+                <strong>{selectedCourse.id}</strong> · {selectedCourse.department}
+              </p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Course title</h4>
+              <p className="course-detail__value course-detail__value--title">{selectedCourse.title}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Description</h4>
+              <p className="course-detail__value">{selectedCourse.description}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Syllabus</h4>
+              {selectedCourse.syllabusUrl ? (
+                <p className="course-detail__value">
+                  <a href={selectedCourse.syllabusUrl} target="_blank" rel="noreferrer">
+                    Open course syllabus
+                  </a>{" "}
+                  <span className="muted">(mock link)</span>
+                </p>
+              ) : (
+                <p className="course-detail__value muted">
+                  No syllabus in this mock catalog. In production this would point to the LMS or department site.
+                </p>
+              )}
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Instructor</h4>
+              <p className="course-detail__value">{selectedCourse.professor}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Credits</h4>
+              <p className="course-detail__value">{selectedCourse.credits} credits</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Class times</h4>
+              <p className="course-detail__value">{meetingLabel(selectedCourse.meetingTimes)}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Exam</h4>
+              <p className="course-detail__value">{selectedCourse.examTime}</p>
+            </div>
+            {getCourseDegreeMatches(selectedCourse.id, currentUser.programs).length > 0 && (
+              <div className="course-detail__section">
+                <h4 className="course-detail__label">Program fit</h4>
+                <div className="chip-row">
+                  {getCourseDegreeMatches(selectedCourse.id, currentUser.programs).map((label) => (
+                    <span className="chip" key={label}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {helpOpen && (
+        <Modal
+          title="Tips and keyboard"
+          onClose={() => setHelpOpen(false)}
+          actions={
+            <button className="btn btn--primary" type="button" onClick={() => setHelpOpen(false)}>
+              Got it
+            </button>
+          }
+        >
+          <ul className="help-tips">
+            <li>
+              Press <kbd>?</kbd> (on many US keyboards: <kbd>Shift</kbd>+<kbd>/</kbd>) to open or close this panel when
+              you are <strong>not</strong> focused in a text field.
+            </li>
+            <li>
+              Press <kbd>Esc</kbd> to close any dialog, including this one and course details.
+            </li>
+            <li>
+              Use the top navigation: <strong>Enrollment</strong> to search and enroll, <strong>Planning</strong> to try
+              alternate course sets, <strong>Settings</strong> for the calendar view and high contrast.
+            </li>
+            <li>Download a <strong>week</strong> file (Enrollment → weekly calendar) to check your plan on a phone or desktop calendar app.</li>
+          </ul>
         </Modal>
       )}
 

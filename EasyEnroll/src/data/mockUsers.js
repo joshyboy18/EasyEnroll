@@ -5,6 +5,7 @@ export const mockUsers = [
     email: "jlee@easyenroll.edu",
     password: "demo123",
     programs: ["bs-cs", "minor-math"],
+    classYear: 1,
   },
   {
     id: "u-apatel",
@@ -12,6 +13,7 @@ export const mockUsers = [
     email: "apatel@easyenroll.edu",
     password: "demo123",
     programs: ["bs-bio"],
+    classYear: 2,
   },
   {
     id: "u-mrivera",
@@ -19,5 +21,6 @@ export const mockUsers = [
     email: "mrivera@easyenroll.edu",
     password: "demo123",
     programs: ["bs-cs"],
+    classYear: 4,
   },
 ]
