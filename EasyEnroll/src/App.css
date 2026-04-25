@@ -1,3 +1,26 @@
+.skip-link {
+	position: absolute;
+	left: 0.5rem;
+	top: 0.5rem;
+	z-index: 100;
+	padding: 0.5rem 0.75rem;
+	background: var(--bg-panel);
+	color: var(--text);
+	border: 2px solid var(--primary);
+	border-radius: 8px;
+	font-weight: 700;
+	font-size: 0.9rem;
+	text-decoration: none;
+	transform: translateY(-200%);
+	transition: transform 0.2s ease;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+	transform: translateY(0);
+	outline: none;
+}
+
 .app-shell {
 	padding: 1.25rem;
 	color: var(--text);
@@ -207,6 +230,12 @@ select {
 	padding-right: 0.25rem;
 }
 
+/* Compact catalog: multi-column card grid within each pane (collapses to one column when narrow) */
+.scroll-list--compact-grid {
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr));
+	align-content: start;
+}
+
 .course-card {
 	border: 1px solid var(--border);
 	border-radius: 10px;
@@ -244,6 +273,19 @@ select {
 .course-card__meta {
 	color: var(--muted);
 	font-size: 0.86rem;
+}
+
+.course-card--compact {
+	padding: 0.5rem 0.6rem;
+	gap: 0.28rem;
+}
+
+.course-card--compact .course-card__title {
+	font-size: 1rem;
+}
+
+.course-card__meta--compact {
+	margin-top: 0.1rem;
 }
 
 .chip-row {
@@ -355,6 +397,131 @@ select {
 	flex-wrap: wrap;
 }
 
+.planning-summary-strip {
+	margin-top: 0.6rem;
+	padding: 0.55rem 0.75rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1.25rem;
+	border-radius: 10px;
+	border: 1px solid var(--border);
+	background: #f0faf2;
+	font-size: 0.9rem;
+}
+
+html.high-contrast .planning-summary-strip {
+	background: var(--surface-inset);
+}
+
+.plan-compare-hint {
+	margin: 0.5rem 0 0.25rem;
+	font-size: 0.9rem;
+}
+
+.plan-compare {
+	margin-top: 0.65rem;
+	padding: 0.7rem 0.85rem;
+	border-radius: 10px;
+	border: 1px solid var(--border);
+	background: #f8fbff;
+}
+
+.plan-compare h3 {
+	margin: 0 0 0.35rem;
+	font-size: 1.02rem;
+}
+
+.plan-compare h4 {
+	margin: 0 0 0.3rem;
+	font-size: 0.92rem;
+}
+
+.plan-compare__pickers {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem 1.25rem;
+	margin: 0.5rem 0 0.75rem;
+}
+
+.plan-compare__pickers label {
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+	font-size: 0.88rem;
+}
+
+.plan-compare__pickers select {
+	min-width: 12rem;
+	padding: 0.35rem 0.4rem;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+}
+
+.plan-compare__grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.75rem 1rem;
+}
+
+.plan-compare__grid ul {
+	margin: 0;
+	padding-left: 1.1rem;
+	font-size: 0.88rem;
+}
+
+@media (max-width: 900px) {
+	.plan-compare__grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+html.high-contrast .plan-compare {
+	background: var(--surface-muted);
+}
+
+.plan-compare-disclosure {
+	margin-top: 0.5rem;
+}
+
+.plan-compare-disclosure__bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 0.9rem;
+}
+
+.plan-compare-disclosure__hint {
+	font-size: 0.88rem;
+	margin: 0;
+}
+
+.planning-filters-bar {
+	margin-top: 0.65rem;
+	margin-bottom: 0.35rem;
+	padding: 0.65rem 0.8rem;
+	border-radius: 10px;
+	border: 1px dashed var(--border);
+	background: #fbfffb;
+	display: grid;
+	gap: 0.5rem;
+}
+
+.planning-filters-bar__text {
+	margin: 0;
+	font-size: 0.88rem;
+	line-height: 1.4;
+}
+
+.planning-filters-bar__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+}
+
+html.high-contrast .planning-filters-bar {
+	background: var(--surface-muted);
+}
+
 .planning-conflicts ul {
 	margin: 0;
 	padding-left: 1rem;
@@ -365,6 +532,56 @@ select {
 	display: grid;
 	gap: 0.6rem;
 	max-width: 650px;
+}
+
+.profile-section,
+.settings-section--wide {
+	max-width: none;
+	width: 100%;
+}
+
+.settings-page-title {
+	margin: 0 0 0.5rem;
+	grid-column: 1 / -1;
+}
+
+.settings-page-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 1.5rem 2rem;
+	align-items: start;
+	width: 100%;
+}
+
+.settings-page-grid__col--help {
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: #f6fcf7;
+	padding: 0.75rem 1rem 1rem;
+}
+
+.settings-help-heading {
+	margin: 0 0 0.25rem;
+	font-size: 1.1rem;
+}
+
+.settings-help-lead {
+	margin: 0 0 0.5rem;
+	font-size: 0.88rem;
+}
+
+.settings-help-box {
+	margin: 0;
+}
+
+html.high-contrast .settings-page-grid__col--help {
+	background: var(--surface-inset);
+}
+
+@media (max-width: 900px) {
+	.settings-page-grid {
+		grid-template-columns: 1fr;
+	}
 }
 
 .profile-section {
@@ -381,6 +598,40 @@ select {
 	display: grid;
 	gap: 0.9rem;
 	margin-top: 0.5rem;
+}
+
+.profile-group {
+	padding: 0.5rem 0;
+	border-top: 1px dashed var(--border);
+}
+
+.profile-group:first-of-type {
+	border-top: 0;
+	padding-top: 0;
+}
+
+.profile-group__title {
+	margin: 0 0 0.25rem;
+	font-size: 1.05rem;
+}
+
+.profile-group__lead {
+	margin: 0 0 0.6rem;
+	font-size: 0.88rem;
+}
+
+.profile-public-preview {
+	margin: 0.35rem 0 0.6rem;
+	padding: 0.45rem 0.6rem;
+	border-radius: 8px;
+	background: #fff;
+	border: 1px solid var(--border);
+	font-size: 0.9rem;
+}
+
+html.high-contrast .profile-wide-card,
+html.high-contrast .profile-public-preview {
+	background: var(--surface-muted);
 }
 
 .filter-preset-bar {
@@ -449,6 +700,31 @@ select {
 	white-space: nowrap;
 }
 
+.onboarding-notice {
+	margin: 0.55rem 0 0.25rem;
+	padding: 0.55rem 0.7rem;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+	background: #eef6ff;
+	border: 1px solid #8fb8e8;
+	border-radius: 10px;
+	font-size: 0.9rem;
+}
+
+.onboarding-notice p {
+	margin: 0;
+	flex: 1;
+	min-width: 12rem;
+}
+
+html.high-contrast .onboarding-notice {
+	background: var(--surface-inset);
+	border-color: var(--border);
+}
+
 .settings-advanced {
 	margin-top: 0.35rem;
 	border: 1px solid var(--border);
@@ -466,6 +742,108 @@ select {
 .settings-advanced__body {
 	margin-top: 0.4rem;
 	padding-top: 0.1rem;
+}
+
+.settings-backup {
+	margin-top: 0.45rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 0.35rem 0.6rem 0.5rem;
+	background: #f8f9fc;
+}
+
+.settings-backup summary {
+	cursor: pointer;
+	font-weight: 600;
+	font-size: 0.92rem;
+}
+
+.settings-backup__body {
+	margin-top: 0.4rem;
+}
+
+.settings-backup__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	align-items: center;
+}
+
+.settings-file-input {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+.session-stats {
+	margin: 0.35rem 0 0;
+	padding-left: 1.1rem;
+	font-size: 0.86rem;
+	color: var(--muted);
+}
+
+.import-summary__lead {
+	margin: 0 0 0.65rem;
+}
+
+.import-summary__table-wrap {
+	max-height: min(50vh, 360px);
+	overflow: auto;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+}
+
+.import-summary__table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.88rem;
+}
+
+.import-summary__table th,
+.import-summary__table td {
+	border-bottom: 1px solid var(--border);
+	padding: 0.4rem 0.5rem;
+	text-align: left;
+	vertical-align: top;
+}
+
+.import-summary__table thead th {
+	background: #f0faf2;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+}
+
+.import-summary__ok {
+	color: #0d4a1f;
+	font-weight: 600;
+}
+
+.import-summary__skip {
+	color: #6b1d1d;
+	font-weight: 600;
+}
+
+.mock-syllabus-link {
+	color: #1a4a8c;
+	font-weight: 600;
+	text-decoration: underline;
+	cursor: default;
+}
+
+.course-detail__fine {
+	margin: 0.25rem 0 0;
+	font-size: 0.86rem;
+}
+
+html.high-contrast .import-summary__table thead th {
+	background: var(--surface-inset);
 }
 
 .settings-doc-link {
@@ -488,11 +866,6 @@ select {
 	padding: 0.1rem 0.35rem;
 	font-size: 0.9em;
 	font-family: ui-monospace, Consolas, monospace;
-}
-
-.help-key-hint {
-	font-size: 0.85em;
-	opacity: 0.85;
 }
 
 .toggle-row {
@@ -619,6 +992,11 @@ select {
 .toast__text {
 	margin: 0;
 	flex: 1;
+}
+
+.toast__action {
+	flex-shrink: 0;
+	margin-left: 0.15rem;
 }
 
 .toast__close {
@@ -1032,6 +1410,10 @@ html.reduce-motion .btn:hover {
 	transform: none;
 }
 
+html.reduce-motion .skip-link {
+	transition: none;
+}
+
 .course-detail {
 	display: grid;
 	gap: 1rem;
@@ -1190,6 +1572,16 @@ html.high-contrast .enrollment-undo-bar {
 
 html.high-contrast .settings-advanced {
 	background: var(--surface-inset);
+}
+
+html.high-contrast .settings-backup {
+	background: var(--surface-inset);
+}
+
+html.high-contrast .help-tips kbd {
+	background: var(--surface-muted);
+	color: var(--text);
+	border-color: var(--border);
 }
 
 html.high-contrast .planning-unsaved {

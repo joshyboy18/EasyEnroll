@@ -2,8 +2,9 @@
  * suggestedYears: 1–4 class levels that fit the course (typical first year to senior).
  * isGenEd: general education / core literacy when true.
  * trackTags: 'cs' | 'bio' | 'math' | 'all' for mock filtering only.
+ * syllabusUrl: filled in below with a **mock** registrar URL (not a real destination).
  */
-export const courses = [
+const rawCourses = [
   {
     id: "CS-110",
     title: "CS Survey & Lab",
@@ -22,7 +23,6 @@ export const courses = [
     ],
     examTime: "Wed 05/08 09:00–11:00",
     description: "Introductory computing for new majors; hands-on lab.",
-    syllabusUrl: "https://lms.school.example.edu/courses/cs-110/syllabus",
   },
   {
     id: "CS-101",
@@ -437,3 +437,13 @@ export const courses = [
     description: "Form, color, and critiquing visual work; studio and lecture hybrid.",
   },
 ]
+
+/** Placeholder only — the UI labels these as “mock link” and prevents navigation. */
+export function mockSyllabusUrlForCourseId(courseId) {
+  return `https://mock.registrar.example.edu/syllabus/${encodeURIComponent(courseId)}`
+}
+
+export const courses = rawCourses.map((c) => ({
+  ...c,
+  syllabusUrl: c.syllabusUrl ?? mockSyllabusUrlForCourseId(c.id),
+}))

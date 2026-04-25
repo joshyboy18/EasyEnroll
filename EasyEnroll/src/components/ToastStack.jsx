@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from "react"
 const DURATION_MS = 4500
 
 /**
- * @returns {{ toasts: {id: string, type: 'success' | 'error', message: string}[], pushToast: (type: 'success' | 'error', message: string) => void, dismiss: (id: string) => void, ToastContainer: () => JSX.Element }}
+ * @returns {object} toasts, pushToast(type, message, action?), dismiss, ToastContainer
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -19,9 +19,18 @@ export function useToast() {
   }, [])
 
   const pushToast = useCallback(
-    (type, message) => {
+    (type, message, action) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-      setToasts((prev) => [...prev, { id, type, message }])
+      setToasts((prev) => [
+        ...prev,
+        {
+          id,
+          type,
+          message,
+          actionLabel: action?.label,
+          onAction: action?.onAction,
+        },
+      ])
       const handle = setTimeout(() => {
         dismiss(id)
       }, DURATION_MS)
@@ -40,6 +49,18 @@ export function useToast() {
             role="status"
           >
             <span className="toast__text">{t.message}</span>
+            {t.actionLabel && t.onAction && (
+              <button
+                className="btn btn--subtle toast__action"
+                type="button"
+                onClick={() => {
+                  t.onAction()
+                  dismiss(t.id)
+                }}
+              >
+                {t.actionLabel}
+              </button>
+            )}
             <button
               className="toast__close"
               type="button"

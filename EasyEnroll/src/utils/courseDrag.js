@@ -1,50 +1,13 @@
 /**
- * Custom drag image for course cards. DOM-based setDragImage() is still drawn with reduced
- * opacity in many browsers. A solid canvas (2D, no alpha) reads as a normal bitmap to the
- * drag pipeline and typically stays full-strength.
+ * Course card drag: hide the native semi-transparent drag image (1×1 transparent),
+ * and show a full-opacity “ghost” that follows the pointer during drag.
  */
 
-/** @type {HTMLCanvasElement | null} Remains in DOM only until drag ends (or is replaced by next drag). */
-let activeDragNode = null
+/** @type {null | (() => void)} */
+let activeCleanup = null
 
-/**
- * @param {CanvasRenderingContext2D} ctx
- * @param {string} text
- * @param {number} x
- * @param {number} y0
- * @param {number} maxWidth
- * @param {number} lineHeight
- * @returns {number} bottom y of last line
- */
-function drawWrappedText(ctx, text, x, y0, maxWidth, lineHeight) {
-  if (!text) {
-    return y0
-  }
-  const words = String(text).split(/\s+/).filter(Boolean)
-  let y = y0
-  let line = ""
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word
-    if (ctx.measureText(test).width > maxWidth) {
-      if (line) {
-        ctx.fillText(line, x, y)
-        y += lineHeight
-        line = word
-      } else {
-        ctx.fillText(word, x, y)
-        y += lineHeight
-        line = ""
-      }
-    } else {
-      line = test
-    }
-  }
-  if (line) {
-    ctx.fillText(line, x, y)
-    y += lineHeight
-  }
-  return y
-}
+const TRANSPARENT_PX =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="
 
 /**
  * @param {DragEvent} event
@@ -53,114 +16,100 @@ function drawWrappedText(ctx, text, x, y0, maxWidth, lineHeight) {
 export function attachOpaqueCourseDrag(event, course) {
   event.dataTransfer.setData("text/plain", course.id)
   event.dataTransfer.effectAllowed = "copy"
+
   const el = event.currentTarget
   if (!(el instanceof HTMLElement)) {
     return
   }
+  if (activeCleanup) {
+    activeCleanup()
+    activeCleanup = null
+  }
+
+  const img = new Image()
+  img.src = TRANSPARENT_PX
+  const go = () => {
+    try {
+      event.dataTransfer.setDragImage(img, 0, 0)
+    } catch {
+      // ignore
+    }
+  }
+  if (img.complete) {
+    go()
+  } else {
+    img.onload = go
+  }
 
   const rect = el.getBoundingClientRect()
-  if (rect.width < 1 || rect.height < 1) {
-    return
-  }
+  const offX = Math.max(0, event.clientX - rect.left)
+  const offY = Math.max(0, event.clientY - rect.top)
+  const w = Math.max(1, Math.min(400, Math.round(rect.width)))
+  const h = Math.max(1, Math.min(360, Math.round(rect.height)))
 
-  const maxW = 400
-  const maxH = 360
-  const w = Math.max(1, Math.min(maxW, Math.round(rect.width)))
-  const h = Math.max(1, Math.min(maxH, Math.round(rect.height)))
-  const sx = w / rect.width
-  const sy = h / rect.height
+  const ghost = document.createElement("div")
+  ghost.className = "course-card course-card--drag-ghost"
+  ghost.setAttribute("role", "presentation")
+  ghost.setAttribute("aria-hidden", "true")
+  const meta = [course.id, course.title, `${course.credits} cr`]
+    .filter(Boolean)
+    .join(" — ")
+  ghost.innerHTML = `<div class="course-card--drag-ghost__inner"><strong>${escapeHtml(
+    String(course.id),
+  )}</strong><span>${escapeHtml(String(course.title || ""))}</span><small>${escapeHtml(meta)}</small></div>`
 
-  const canvas = document.createElement("canvas")
-  canvas.width = w
-  canvas.height = h
-  let ctx = canvas.getContext("2d", { alpha: false })
-  if (!ctx) {
-    ctx = canvas.getContext("2d")
-  }
-  if (!ctx) {
-    return
-  }
-
-  ctx.fillStyle = "#fbfffb"
-  ctx.fillRect(0, 0, w, h)
-  ctx.strokeStyle = "#cce4d0"
-  ctx.lineWidth = 1
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, 0, w, h)
-  ctx.clip()
-
-  const pad = 8
-  let y = pad + 4
-
-  ctx.fillStyle = "#123321"
-  ctx.font = "800 16px 'Segoe UI', 'Trebuchet MS', system-ui, sans-serif"
-  ctx.textBaseline = "top"
-  ctx.fillText(String(course.id), pad, y)
-  y += 22
-
-  ctx.fillStyle = "#14361e"
-  ctx.font = "700 13px 'Segoe UI', 'Trebuchet MS', system-ui, sans-serif"
-  y = drawWrappedText(ctx, String(course.title || ""), pad, y, w - pad * 2, 17) + 2
-
-  ctx.fillStyle = "#52715f"
-  ctx.font = "11px 'Segoe UI', system-ui, sans-serif"
-  const dept = course.department ? ` · ${course.department}` : ""
-  const prof = course.professor ? ` — ${course.professor}` : ""
-  const meta = `${String(course.credits)} cr${dept}${prof}`
-  y = drawWrappedText(ctx, meta, pad, y, w - pad * 2, 14) + 4
-  ctx.restore()
-
-  const ox = Math.max(0, (event.clientX - rect.left) * sx)
-  const oy = Math.max(0, (event.clientY - rect.top) * sy)
-
-  if (activeDragNode?.parentNode) {
-    activeDragNode.remove()
-  }
-
-  // Keep the bitmap in the document briefly — some engines snapshot DOM-backed nodes
-  // at full opacity; detached canvases are sometimes composited with extra transparency.
-  canvas.setAttribute("aria-hidden", "true")
-  Object.assign(canvas.style, {
-    position: "absolute",
-    left: "-10000px",
+  Object.assign(ghost.style, {
+    position: "fixed",
+    left: "0",
     top: "0",
     width: `${w}px`,
-    height: `${h}px`,
-    opacity: "1",
+    minHeight: `${h}px`,
+    zIndex: "100000",
+    pointerEvents: "none",
+    margin: "0",
+    boxSizing: "border-box",
+    transform: `translate(${event.clientX - offX}px, ${event.clientY - offY}px)`,
   })
-  document.body.appendChild(canvas)
-  activeDragNode = canvas
+  document.body.appendChild(ghost)
 
-  try {
-    // Inline PNG data URLs often decode in the same turn; a decoded Image is more reliably opaque.
-    const dataUrl = canvas.toDataURL("image/png")
-    const img = new Image()
-    img.src = dataUrl
-    if (img.complete && img.naturalWidth > 0) {
-      event.dataTransfer.setDragImage(img, ox, oy)
-      canvas.remove()
-      activeDragNode = null
-    } else {
-      event.dataTransfer.setDragImage(canvas, ox, oy)
+  const onDrag = (e) => {
+    if (!e.isTrusted) {
+      return
     }
-  } catch {
-    try {
-      event.dataTransfer.setDragImage(canvas, ox, oy)
-    } catch {
-      if (canvas.parentNode) {
-        canvas.remove()
-      }
-      activeDragNode = null
+    ghost.style.transform = `translate(${e.clientX - offX}px, ${e.clientY - offY}px)`
+  }
+
+  const cleanup = () => {
+    document.removeEventListener("drag", onDrag, true)
+    el.removeEventListener("dragend", onEnd, true)
+    if (ghost.parentNode) {
+      ghost.remove()
+    }
+    if (activeCleanup === cleanup) {
+      activeCleanup = null
     }
   }
+
+  const onEnd = () => {
+    cleanup()
+  }
+
+  document.addEventListener("drag", onDrag, true)
+  el.addEventListener("dragend", onEnd, true)
+  activeCleanup = cleanup
+}
+
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
 }
 
 export function endCourseCardDrag() {
-  if (activeDragNode?.parentNode) {
-    activeDragNode.remove()
+  if (activeCleanup) {
+    activeCleanup()
+    activeCleanup = null
   }
-  activeDragNode = null
 }

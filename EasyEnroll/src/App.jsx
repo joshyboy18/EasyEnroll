@@ -26,7 +26,7 @@ import {
   saveUserBucket,
 } from "./utils/storage"
 import { attachOpaqueCourseDrag, endCourseCardDrag } from "./utils/courseDrag.js"
-import { buildWeekScheduleIcs, downloadIcsFile } from "./utils/ics.js"
+import { buildSemesterScheduleIcs, buildSingleCourseIcs, buildWeekScheduleIcs, downloadIcsFile } from "./utils/ics.js"
 
 const MAX_CREDITS = 19
 const SCHOOL_EMAIL_DOMAIN = "@school.edu"
@@ -40,34 +40,6 @@ const VIEW_WAYFINDING = {
 
 const EVENT_COLOR_PRESETS = ["#1f8f4c", "#2f6fcb", "#7a3d8c", "#b85c0a", "#0d4a4a", "#6b1d3d"]
 
-function isFormTypingTarget(el) {
-  if (!el) {
-    return false
-  }
-  if (el.isContentEditable) {
-    return true
-  }
-  const tag = el.tagName
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return true
-  }
-  const role = el.getAttribute?.("role")
-  if (role === "textbox" || role === "searchbox" || role === "combobox") {
-    return true
-  }
-  return false
-}
-
-function isHelpHotkey(e) {
-  if (e.key === "?" || e.key === "？") {
-    return true
-  }
-  if (e.code === "Slash" && e.shiftKey) {
-    return true
-  }
-  return false
-}
-
 const defaultSettings = {
   compactCalendar: false,
   showConflictAlerts: true,
@@ -76,6 +48,10 @@ const defaultSettings = {
   reduceInterfaceMotion: false,
   /** High-contrast theme for readability (also helps in bright light). */
   highContrast: false,
+  /** Tighter course cards in catalog lists. */
+  compactCatalog: false,
+  /** In-memory only: count UI actions and show in Settings. */
+  trackSessionStats: true,
 }
 
 function mergeSettingsWithDefaults(stored) {
@@ -130,10 +106,11 @@ function CourseCard({
   draggable,
   actionVariant = "primary",
   actionDisabled = false,
+  compact = false,
 }) {
   return (
     <article
-      className="course-card"
+      className={`course-card${compact ? " course-card--compact" : ""}`}
       draggable={draggable}
       onDragStart={(event) => {
         if (draggable) {
@@ -161,8 +138,17 @@ function CourseCard({
       </header>
       <p className="course-card__title">{course.title}</p>
       <p className="course-card__meta">{formatCourseMeta(course)}</p>
-      <p className="course-card__meta">Class Time: {meetingLabel(course.meetingTimes)}</p>
-      <p className="course-card__meta">Exam: {course.examTime}</p>
+      {!compact && (
+        <>
+          <p className="course-card__meta">Class Time: {meetingLabel(course.meetingTimes)}</p>
+          <p className="course-card__meta">Exam: {course.examTime}</p>
+        </>
+      )}
+      {compact && (
+        <p className="course-card__meta course-card__meta--compact">
+          {meetingLabel(course.meetingTimes)} · Exam: {course.examTime}
+        </p>
+      )}
       {degreeLabels.length > 0 && (
         <div className="chip-row">
           {degreeLabels.map((label) => (
@@ -187,10 +173,81 @@ function CourseCard({
   )
 }
 
+function HelpTipsList() {
+  return (
+    <ul className="help-tips">
+      <li>
+        Open <strong>Settings</strong> for this list anytime; the right column is dedicated to keyboard and tips.
+      </li>
+      <li>
+        Press <kbd>Esc</kbd> to close any dialog, including course details and import summary.
+      </li>
+      <li>
+        Use the top navigation: <strong>Enrollment</strong> to search and enroll, <strong>Planning</strong> to try
+        alternate course sets, <strong>Settings</strong> for the calendar view and high contrast.
+      </li>
+      <li>
+        Download a <strong>week</strong> file (Enrollment → weekly calendar) to check your plan on a phone or desktop
+        calendar app.
+      </li>
+    </ul>
+  )
+}
+
 function Modal({ title, children, onClose, actions }) {
+  const panelRef = useRef(null)
+  const prevActiveRef = useRef(null)
+  useEffect(() => {
+    prevActiveRef.current = document.activeElement
+    const root = panelRef.current
+    const t = setTimeout(() => {
+      if (!root) {
+        return
+      }
+      const first = root.querySelector(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )
+      if (first instanceof HTMLElement) {
+        first.focus()
+      }
+    }, 0)
+    const onKey = (e) => {
+      if (e.key !== "Tab" || !root) {
+        return
+      }
+      const list = [
+        ...root.querySelectorAll(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null)
+      if (list.length === 0) {
+        return
+      }
+      const first = list[0]
+      const last = list[list.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        }
+      } else if (document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener("keydown", onKey, true)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener("keydown", onKey, true)
+      if (typeof prevActiveRef.current?.focus === "function") {
+        prevActiveRef.current.focus()
+      }
+    }
+  }, [title])
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section
+        ref={panelRef}
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -286,7 +343,6 @@ function App() {
   const [departmentFilter, setDepartmentFilter] = useState("All")
   const [seatFilter, setSeatFilter] = useState("all")
   const [programOnly, setProgramOnly] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [enrollmentUndoCourse, setEnrollmentUndoCourse] = useState(null)
   const enrollmentUndoTimerRef = useRef(null)
 
@@ -343,6 +399,14 @@ function App() {
   const [uniRequest, setUniRequest] = useState(null)
   const [uniRequestNote, setUniRequestNote] = useState("")
 
+  const [importSummaryModal, setImportSummaryModal] = useState(null)
+  const [comparePlanAId, setComparePlanAId] = useState(null)
+  const [comparePlanBId, setComparePlanBId] = useState(null)
+  const [comparePlansOpen, setComparePlansOpen] = useState(false)
+  const [welcomeDismissed, setWelcomeDismissed] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("easyenroll.dismissWelcome") === "1",
+  )
+
   const [eventForm, setEventForm] = useState({
     title: "",
     details: "",
@@ -355,6 +419,24 @@ function App() {
 
   const popupRef = useRef(null)
   const keyboardLayerRef = useRef({})
+  const sessionStatsRef = useRef({
+    filterClears: 0,
+    filterPresets: 0,
+    enrollSuccess: 0,
+    planImports: 0,
+    planExportDownloads: 0,
+    planImportUploads: 0,
+  })
+  const [, setSessionStatsRender] = useState(0)
+  const bumpSession = useCallback(
+    (key) => {
+      sessionStatsRef.current[key] += 1
+      if (settings.trackSessionStats) {
+        setSessionStatsRender((n) => n + 1)
+      }
+    },
+    [settings.trackSessionStats],
+  )
 
   const currentUser = useMemo(
     () => mockUsers.find((entry) => entry.id === session?.userId) || null,
@@ -474,7 +556,7 @@ function App() {
   }, [enrolledIds, enrollmentUndoCourse, clearEnrollmentUndo])
 
   keyboardLayerRef.current = {
-    helpOpen,
+    importSummaryModal,
     eventModal,
     planPickerOpen,
     uniRequest,
@@ -489,9 +571,9 @@ function App() {
     const onKey = (e) => {
       const s = keyboardLayerRef.current
       if (e.key === "Escape") {
-        if (s.helpOpen) {
+        if (s.importSummaryModal) {
           e.preventDefault()
-          setHelpOpen(false)
+          setImportSummaryModal(null)
           return
         }
         if (s.eventModal) {
@@ -521,20 +603,6 @@ function App() {
         }
         return
       }
-      if (e.ctrlKey || e.metaKey || e.altKey) {
-        return
-      }
-      if (e.repeat) {
-        return
-      }
-      if (!isHelpHotkey(e)) {
-        return
-      }
-      if (isFormTypingTarget(document.activeElement)) {
-        return
-      }
-      e.preventDefault()
-      setHelpOpen((o) => !o)
     }
     window.addEventListener("keydown", onKey, { capture: true })
     return () => window.removeEventListener("keydown", onKey, { capture: true })
@@ -693,6 +761,7 @@ function App() {
   }, [plansDirty, activeView])
 
   const clearFilters = () => {
+    bumpSession("filterClears")
     setSearchText("")
     setDepartmentFilter("All")
     setSeatFilter("all")
@@ -704,6 +773,7 @@ function App() {
       clearFilters()
       return
     }
+    bumpSession("filterPresets")
     if (preset === "open") {
       setSeatFilter("open")
       setProgramOnly(false)
@@ -718,13 +788,36 @@ function App() {
     if (!currentUser) {
       return
     }
-    const ics = buildWeekScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name}`)
+    const ics = buildWeekScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (this week, mock)`)
     if (!ics) {
       pushToast("error", "Nothing on your calendar to export yet.")
       return
     }
     downloadIcsFile(ics, "easyenroll-week.ics")
-    pushToast("success", "Downloaded a weekly schedule file (.ics). Open it in your phone or desktop calendar.")
+    pushToast("success", "Downloaded a weekly schedule file (.ics).")
+  }
+
+  const downloadSemesterIcs = () => {
+    if (!currentUser) {
+      return
+    }
+    const ics = buildSemesterScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (mock Spring ’26 dates)`)
+    if (!ics) {
+      pushToast("error", "Nothing on your calendar to export yet.")
+      return
+    }
+    downloadIcsFile(ics, "easyenroll-semester.ics")
+    pushToast("success", "Downloaded a semester-anchored .ics (mock start Jan 12, 2026; not from registrar).")
+  }
+
+  const downloadCourseIcs = (course) => {
+    const ics = buildSingleCourseIcs(course)
+    if (!ics) {
+      pushToast("error", "Could not build a file for that course.")
+      return
+    }
+    downloadIcsFile(ics, `${course.id.replace(/[^a-zA-Z0-9-_]/g, "_")}-mock.ics`)
+    pushToast("success", "Downloaded a mock semester file for this course only.")
   }
 
   const addCourseToEnrollment = (course, options = { ignoreEventConflicts: false }) => {
@@ -766,7 +859,11 @@ function App() {
     }
 
     setEnrolledIds((prev) => [...prev, course.id])
-    pushToast("success", `${course.id} was added to your enrollment.`)
+    bumpSession("enrollSuccess")
+    pushToast("success", `${course.id} was added to your enrollment.`, {
+      label: "View week calendar",
+      onAction: () => setActiveView("dashboard"),
+    })
     return { added: true }
   }
 
@@ -937,7 +1034,7 @@ function App() {
       return
     }
 
-    const skipped = []
+    const tableRows = []
     let addedCount = 0
     let workingIds = [...enrolledIds]
     let workingCredits = enrolledCredits
@@ -945,6 +1042,7 @@ function App() {
     for (const courseId of activePlan.courseIds) {
       const course = courses.find((item) => item.id === courseId)
       if (!course) {
+        tableRows.push({ id: courseId, title: "—", result: "skipped", reason: "Unknown course id" })
         continue
       }
 
@@ -959,45 +1057,43 @@ function App() {
 
       if (duplicate || seatBlocked || creditBlocked || classConflict || eventConflict) {
         const reason = duplicate
-          ? "already enrolled"
+          ? "Already enrolled"
           : seatBlocked
-            ? "seat/waitlist unavailable"
+            ? "Seat / waitlist unavailable"
             : creditBlocked
-              ? "credit limit"
+              ? "Would exceed credit limit"
               : classConflict
-                ? `conflicts with ${classConflict.id}`
-                : "conflicts with event"
-        skipped.push(`${course.id} (${reason})`)
+                ? `Time overlap with ${classConflict.id}`
+                : "Overlap with a personal event"
+        tableRows.push({ id: course.id, title: course.title, result: "skipped", reason })
         continue
       }
 
       workingIds = [...workingIds, course.id]
       workingCredits += course.credits
       addedCount += 1
+      tableRows.push({ id: course.id, title: course.title, result: "enrolled", reason: "—" })
     }
 
     setEnrolledIds(workingIds)
+    bumpSession("planImports")
 
     if (addedCount > 0) {
       pushToast(
         "success",
-        skipped.length === 0
+        tableRows.filter((r) => r.result === "skipped").length === 0
           ? `Imported ${addedCount} course(s) into your enrollment.`
-          : `Imported ${addedCount} course(s). Some were skipped (see summary).`,
+          : `Imported ${addedCount} course(s). Open the table for skip reasons.`,
+        {
+          label: "View week calendar",
+          onAction: () => setActiveView("dashboard"),
+        },
       )
     } else {
-      pushToast("error", "No courses could be imported. Check seats, credits, and conflicts.")
+      pushToast("error", "No courses could be imported. See the summary table for reasons.")
     }
 
-    setConfirmState({
-      type: "summary",
-      title: "Import Complete",
-      message:
-        skipped.length === 0
-          ? `Enrolled in ${addedCount} class(es).`
-          : `Enrolled in ${addedCount} class(es). Skipped: ${skipped.join("; ")}`,
-      onConfirm: () => setConfirmState(null),
-    })
+    setImportSummaryModal({ planName: activePlan.name, addedCount, rows: tableRows })
   }
 
   const savePlansSnapshot = () => {
@@ -1005,7 +1101,99 @@ function App() {
     pushToast("success", "Plan changes saved locally.")
   }
 
+  const plansFileInputRef = useRef(null)
+
+  const downloadPlansJson = () => {
+    const blob = new Blob([JSON.stringify(plans, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "easyenroll-plans.json"
+    a.click()
+    URL.revokeObjectURL(url)
+    bumpSession("planExportDownloads")
+    pushToast("success", "Downloaded a JSON backup of your plans (mock local storage only).")
+  }
+
+  const onPlansFileSelected = (event) => {
+    const f = event.target.files?.[0]
+    if (!f) {
+      return
+    }
+    const r = new FileReader()
+    r.onload = () => {
+      try {
+        const data = JSON.parse(/** @type {string} */ (r.result))
+        if (!Array.isArray(data)) {
+          throw new Error("not array")
+        }
+        for (const p of data) {
+          if (typeof p?.id !== "string" || typeof p?.name !== "string" || !Array.isArray(p?.courseIds)) {
+            throw new Error("invalid plan")
+          }
+        }
+        setPlans(data)
+        setLastSavedPlansJson(JSON.stringify(data))
+        setActivePlanId(data[0]?.id ?? null)
+        if (currentUser) {
+          saveUserBucket(currentUser.id, "plans", data)
+        }
+        bumpSession("planImportUploads")
+        pushToast("success", "Imported plans from JSON. Your previous in-browser plan list was replaced.")
+      } catch {
+        pushToast("error", "That file is not valid Easy Enroll plan JSON.")
+      }
+    }
+    r.readAsText(f)
+    event.target.value = ""
+  }
+
   const planningConflicts = useMemo(() => detectPlanConflicts(plannedCourses, events), [plannedCourses, events])
+
+  const planCompare = useMemo(() => {
+    if (plans.length < 1) {
+      return null
+    }
+    const aId = comparePlanAId || plans[0].id
+    const bId = comparePlanBId || plans[Math.min(1, plans.length - 1)].id
+    const a = plans.find((p) => p.id === aId)
+    const b = plans.find((p) => p.id === bId)
+    if (!a || !b) {
+      return null
+    }
+    if (a.id === b.id) {
+      return {
+        a,
+        b,
+        onlyA: [],
+        onlyB: [],
+        both: [...a.courseIds],
+        samePlan: true,
+      }
+    }
+    const as = new Set(a.courseIds)
+    const bs = new Set(b.courseIds)
+    return {
+      a,
+      b,
+      onlyA: a.courseIds.filter((id) => !bs.has(id)),
+      onlyB: b.courseIds.filter((id) => !as.has(id)),
+      both: a.courseIds.filter((id) => bs.has(id)),
+      samePlan: false,
+    }
+  }, [plans, comparePlanAId, comparePlanBId])
+
+  useEffect(() => {
+    if (plans.length < 2) {
+      setComparePlansOpen(false)
+    }
+  }, [plans.length])
+
+  useEffect(() => {
+    if (activeView !== "planning") {
+      setComparePlansOpen(false)
+    }
+  }, [activeView])
 
   const toggleEventDay = (day) => {
     setEventForm((prev) => {
@@ -1061,7 +1249,6 @@ function App() {
     setActivePlanId(null)
     setLastSavedPlansJson("[]")
     setActiveView("dashboard")
-    setHelpOpen(false)
   }
 
   const openCalendarPopout = () => {
@@ -1104,8 +1291,12 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <header className="app-topbar">
+    <>
+      <a className="skip-link" href="#page-main">
+        Skip to main content
+      </a>
+      <main className="app-shell" id="page-main" tabIndex={-1}>
+        <header className="app-topbar">
         <div>
           <h1>Easy Enroll</h1>
           <p className="app-wayfinding muted">{VIEW_WAYFINDING[activeView]}</p>
@@ -1144,18 +1335,6 @@ function App() {
           >
             Settings
           </button>
-          <button
-            className="btn btn--subtle"
-            type="button"
-            onClick={() => setHelpOpen(true)}
-            title="Open tips (? or Shift+/ on US QWERTY when not in a text field)"
-          >
-            Help
-            <span className="help-key-hint" aria-hidden>
-              {" "}
-              (?)
-            </span>
-          </button>
           <button className="btn btn--danger" type="button" onClick={handleLogout}>
             Logout
           </button>
@@ -1163,6 +1342,30 @@ function App() {
       </header>
 
       <ToastContainer />
+
+      {!welcomeDismissed && activeView === "dashboard" && (
+        <div className="onboarding-notice" role="region" aria-label="Getting started">
+          <p>
+            <strong>First time here?</strong> Drag courses into your enrolled list, open <strong>Planning</strong> to try
+            alternate sets, and use <strong>Settings</strong> for calendar focus and contrast. This banner is a one-time
+            mock coach mark.
+          </p>
+          <button
+            className="btn btn--subtle"
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.setItem("easyenroll.dismissWelcome", "1")
+              } catch {
+                /* ignore */
+              }
+              setWelcomeDismissed(true)
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {enrollmentUndoCourse && (
         <div className="enrollment-undo-bar" role="status" aria-live="polite">
@@ -1269,7 +1472,9 @@ function App() {
                 <h2>Available Courses</h2>
                 <p>Click for details. Drag to enroll.</p>
               </header>
-              <div className="scroll-list">
+              <div
+                className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+              >
                 {sortedAvailableCourses.length === 0 && (
                   <p className="muted" role="status">
                     No courses match your filters. Try{" "}
@@ -1287,6 +1492,7 @@ function App() {
                     onOpen={setSelectedCourse}
                     onAdd={addCourseToEnrollment}
                     addLabel="Add"
+                    compact={settings.compactCatalog}
                     draggable
                   />
                 ))}
@@ -1298,7 +1504,9 @@ function App() {
                 <h2>Enrolled Courses</h2>
                 <p>Drop here to enroll. Remove with confirmation.</p>
               </header>
-              <div className="scroll-list">
+              <div
+                className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+              >
                 {enrolledCourses.length === 0 && <p className="muted">No enrolled classes yet.</p>}
                 {enrolledCourses.map((course) => (
                   <CourseCard
@@ -1308,6 +1516,7 @@ function App() {
                     onOpen={setSelectedCourse}
                     onAdd={removeEnrolledCourse}
                     addLabel="Remove"
+                    compact={settings.compactCatalog}
                     actionVariant="danger"
                   />
                 ))}
@@ -1353,10 +1562,19 @@ function App() {
                 >
                   Download week (.ics)
                 </button>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={downloadSemesterIcs}
+                  title="Mock Spring 2026 anchor (Jan 12); not from registrar"
+                >
+                  Download semester (.ics)
+                </button>
               </div>
             </header>
             <p className="muted calendar-hint">
-              Enrolled courses use solid colors. Click a block for course details or to edit a personal event.
+              Enrolled courses use solid colors. Click a block for course details or to edit a personal event. Week and
+              semester .ics files use <strong>mock</strong> dates (see toast after download).
             </p>
             <TimeGridCalendar
               blocks={dashboardBlocks}
@@ -1439,6 +1657,156 @@ function App() {
                 </div>
               </header>
 
+              {activePlan && (
+                <div className="planning-summary-strip" role="status" aria-live="polite">
+                  <span>
+                    <strong>{activePlan.courseIds.length}</strong> course{activePlan.courseIds.length === 1 ? "" : "s"} in
+                    “{activePlan.name}”
+                  </span>
+                  <span>
+                    <strong>{plannedCredits}</strong> planned credits
+                  </span>
+                  <span>
+                    <strong>{planningConflicts.length}</strong> time conflict{planningConflicts.length === 1 ? "" : "s"}{" "}
+                    in this plan
+                  </span>
+                </div>
+              )}
+
+              {plans.length < 2 && (
+                <p className="muted plan-compare-hint" role="note">
+                  Add a second plan to <strong>compare</strong> course sets side by side (only in A, only in B, shared). Use
+                  the button when you have two or more plans.
+                </p>
+              )}
+
+              {plans.length >= 2 && planCompare && (
+                <div className="plan-compare-disclosure">
+                  <div className="plan-compare-disclosure__bar">
+                    <button
+                      className={comparePlansOpen ? "btn btn--subtle" : "btn btn--secondary"}
+                      type="button"
+                      id="plan-compare-toggle"
+                      aria-expanded={comparePlansOpen}
+                      aria-controls="plan-compare-panel"
+                      onClick={() => setComparePlansOpen((o) => !o)}
+                    >
+                      {comparePlansOpen ? "Hide plan comparison" : "Compare two plans…"}
+                    </button>
+                    {!comparePlansOpen && (
+                      <span className="muted plan-compare-disclosure__hint">
+                        Open to diff two saved plans: only in A, only in B, or shared.
+                      </span>
+                    )}
+                  </div>
+                  {comparePlansOpen && (
+                    <section
+                      id="plan-compare-panel"
+                      className="plan-compare"
+                      aria-label="Compare two plans"
+                      role="region"
+                      aria-labelledby="plan-compare-toggle"
+                    >
+                      <h3>Compare two plans</h3>
+                      <p className="muted">Pick which saved plans to diff. Course IDs are from the mock catalog.</p>
+                      <div className="plan-compare__pickers">
+                        <label>
+                          Plan A
+                          <select
+                            value={planCompare.a.id}
+                            onChange={(ev) => setComparePlanAId(ev.target.value)}
+                            aria-label="First plan to compare"
+                          >
+                            {plans.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} ({p.courseIds.length} courses)
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Plan B
+                          <select
+                            value={planCompare.b.id}
+                            onChange={(ev) => setComparePlanBId(ev.target.value)}
+                            aria-label="Second plan to compare"
+                          >
+                            {plans.map((p) => (
+                              <option key={`b-${p.id}`} value={p.id}>
+                                {p.name} ({p.courseIds.length} courses)
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      {planCompare.samePlan && (
+                        <p className="muted">
+                          Select two <strong>different</strong> plans in the lists above to see a diff.
+                        </p>
+                      )}
+                      {!planCompare.samePlan && (
+                        <div className="plan-compare__grid">
+                          <div>
+                            <h4>Only in “{planCompare.a.name}”</h4>
+                            {planCompare.onlyA.length === 0 ? (
+                              <p className="muted">—</p>
+                            ) : (
+                              <ul>
+                                {planCompare.onlyA.map((id) => {
+                                  const c = courses.find((x) => x.id === id)
+                                  return <li key={id}>{c ? `${c.id} — ${c.title}` : id}</li>
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                          <div>
+                            <h4>Only in “{planCompare.b.name}”</h4>
+                            {planCompare.onlyB.length === 0 ? (
+                              <p className="muted">—</p>
+                            ) : (
+                              <ul>
+                                {planCompare.onlyB.map((id) => {
+                                  const c = courses.find((x) => x.id === id)
+                                  return <li key={id}>{c ? `${c.id} — ${c.title}` : id}</li>
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                          <div>
+                            <h4>In both</h4>
+                            {planCompare.both.length === 0 ? (
+                              <p className="muted">—</p>
+                            ) : (
+                              <ul>
+                                {planCompare.both.map((id) => {
+                                  const c = courses.find((x) => x.id === id)
+                                  return <li key={id}>{c ? `${c.id} — ${c.title}` : id}</li>
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
+
+              <div className="planning-filters-bar" role="region" aria-label="Catalog filter connection to Enrollment">
+                <p className="planning-filters-bar__text muted">
+                  The <strong>Available courses</strong> list uses the <strong>same search and filters</strong> as
+                  Enrollment (search, department, seat, program presets). Adjust them there, or clear below.
+                </p>
+                <div className="planning-filters-bar__actions">
+                  <button className="btn btn--subtle" type="button" onClick={() => goToView("dashboard")}>
+                    Open Enrollment (filters)
+                  </button>
+                  <button className="btn btn--subtle" type="button" onClick={clearFilters}>
+                    Clear all filters
+                  </button>
+                </div>
+              </div>
+
               <div className="planning-calendar-wrap">
                 <h3 className="planning-cal-title">Calendar (enrolled + this plan)</h3>
                 <TimeGridCalendar
@@ -1470,7 +1838,9 @@ function App() {
               <div className="pane-grid">
                 <article className="pane">
                   <h3>Available courses</h3>
-                  <div className="scroll-list">
+                  <div
+                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+                  >
                     {sortedAvailableCourses.length === 0 && (
                       <p className="muted" role="status">
                         No courses match your filters. On Enrollment you can change search, department, and seats — or{" "}
@@ -1488,6 +1858,7 @@ function App() {
                         onOpen={setSelectedCourse}
                         onAdd={addToPlan}
                         addLabel="Add to plan"
+                        compact={settings.compactCatalog}
                         actionVariant="secondary"
                         draggable
                       />
@@ -1505,7 +1876,9 @@ function App() {
                       </span>
                     )}
                   </h3>
-                  <div className="scroll-list">
+                  <div
+                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+                  >
                     {activePlan && plannedCourses.length === 0 && <p className="muted">Drag or add classes here.</p>}
                     {plannedCourses.map((course) => (
                       <CourseCard
@@ -1515,6 +1888,7 @@ function App() {
                         onOpen={setSelectedCourse}
                         onAdd={() => removeFromPlan(course.id)}
                         addLabel="Remove"
+                        compact={settings.compactCatalog}
                         actionVariant="danger"
                       />
                     ))}
@@ -1644,162 +2018,270 @@ function App() {
           <p>Identity fields follow university policy. This is a front-end mock only.</p>
 
           <div className="profile-wide-card">
-            <div className="profile-avatar-block">
-            {profile.avatarDataUrl ? (
-              <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
-            ) : (
-              <div className="profile-avatar profile-avatar--ph" aria-hidden>
-                {(profile.name || currentUser.name)
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase()}
+            <div className="profile-group" aria-labelledby="profile-group-photo-heading">
+              <h3 className="profile-group__title" id="profile-group-photo-heading">
+                Photo
+              </h3>
+              <p className="muted profile-group__lead">You can change your picture anytime; it stays in this browser only.</p>
+              <div className="profile-avatar-block">
+                {profile.avatarDataUrl ? (
+                  <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
+                ) : (
+                  <div className="profile-avatar profile-avatar--ph" aria-hidden>
+                    {(profile.name || currentUser.name)
+                      .split(" ")
+                      .map((n) => n[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                )}
+                <label className="profile-file">
+                  Update photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(ev) => {
+                      const f = ev.target.files?.[0]
+                      if (!f) {
+                        return
+                      }
+                      const r = new FileReader()
+                      r.onload = () => {
+                        setProfile((prev) => ({ ...prev, avatarDataUrl: r.result }))
+                        pushToast("success", "Profile picture updated (stored locally in this browser).")
+                      }
+                      r.readAsDataURL(f)
+                    }}
+                  />
+                </label>
               </div>
-            )}
-            <label className="profile-file">
-              Update photo
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(ev) => {
-                  const f = ev.target.files?.[0]
-                  if (!f) {
-                    return
-                  }
-                  const r = new FileReader()
-                  r.onload = () => {
-                    setProfile((prev) => ({ ...prev, avatarDataUrl: r.result }))
-                    pushToast("success", "Profile picture updated (stored locally in this browser).")
-                  }
-                  r.readAsDataURL(f)
-                }}
-              />
-            </label>
             </div>
 
-            <div className="profile-locked">
-            <p>
-              <strong>Display name:</strong> {profile.name || currentUser.name}
-            </p>
-            <p className="muted">Legal name and password are managed by the university directory.</p>
-            <div className="profile-request-row">
-              <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
-                Request name change
-              </button>
-              <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "password" })}>
-                Request password change
-              </button>
-            </div>
+            <div className="profile-group profile-group--locked" aria-labelledby="profile-group-identity-heading">
+              <h3 className="profile-group__title" id="profile-group-identity-heading">
+                Identity (read-only in this mock)
+              </h3>
+              <p className="muted profile-group__lead">
+                Public / legal identity can’t be changed here — requests go through the university. No real submission;
+                the modal is a stand-in flow.
+              </p>
+              <div className="profile-locked">
+                <p>
+                  <strong>Display name (read-only):</strong> {profile.name || currentUser.name}
+                </p>
+                <p className="muted">Legal name and password are managed by the university directory.</p>
+                <div className="profile-request-row">
+                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
+                    Request name change
+                  </button>
+                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "password" })}>
+                    Request password change
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <label>
-            School email
-            <div className="email-split">
-              <input
-                value={profile.emailLocal}
-                onChange={(event) => {
-                  const t = event.target.value.replace(/[^a-zA-Z0-9._-]/g, "")
-                  setProfile((prev) => ({ ...prev, emailLocal: t }))
-                }}
-                type="text"
-                autoComplete="off"
-                placeholder="username"
-                aria-label="Email local part (before @)"
-              />
-              <span className="email-split__domain" aria-hidden>
-                {SCHOOL_EMAIL_DOMAIN}
-              </span>
+            <div className="profile-group" aria-labelledby="profile-group-contact-heading">
+              <h3 className="profile-group__title" id="profile-group-contact-heading">
+                School email (editable local part)
+              </h3>
+              <p className="muted profile-group__lead">
+                How a classmate or instructor might see your campus address. “Public preview” = this email line only — no
+                live directory.
+              </p>
+              <div className="profile-public-preview" aria-label="Mock public email preview">
+                <span className="muted">Preview:</span>{" "}
+                <strong>
+                  {(profile.emailLocal || "username").trim() || "username"}
+                  {SCHOOL_EMAIL_DOMAIN}
+                </strong>
+              </div>
+              <label>
+                Edit local part
+                <div className="email-split">
+                  <input
+                    value={profile.emailLocal}
+                    onChange={(event) => {
+                      const t = event.target.value.replace(/[^a-zA-Z0-9._-]/g, "")
+                      setProfile((prev) => ({ ...prev, emailLocal: t }))
+                    }}
+                    type="text"
+                    autoComplete="off"
+                    placeholder="username"
+                    aria-label="Email local part (before @)"
+                  />
+                  <span className="email-split__domain" aria-hidden>
+                    {SCHOOL_EMAIL_DOMAIN}
+                  </span>
+                </div>
+                <span className="muted" style={{ fontSize: "0.85rem" }}>
+                  You may edit only the part before @; the domain is fixed for university routing.
+                </span>
+              </label>
             </div>
-            <span className="muted" style={{ fontSize: "0.85rem" }}>
-              You may edit only the part before @; the domain is fixed for university routing.
-            </span>
-            </label>
           </div>
         </section>
       )}
 
       {activeView === "settings" && (
-        <section className="settings-section">
-          <h2>Settings</h2>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={settings.compactCalendar}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, compactCalendar: event.target.checked }))
-              }
-            />
-            Focus week view on your schedule
-          </label>
-          <p className="muted settings-hint">
-            Crops the week view to the earliest and latest time on your schedule (courses and personal events) plus one
-            hour of padding, snapped to whole hours. Hides off-hours. Applies to Enrollment, Planning, and the calendar
-            pop-out. If nothing is on the schedule, a default 7:00 a.m.–7:00 p.m. window is used.
-          </p>
-          <details className="settings-advanced">
-            <summary>Alerts, motion, and contrast (show more)</summary>
-            <div className="settings-advanced__body">
+        <section className="settings-section settings-section--wide">
+          <h2 className="settings-page-title">Settings</h2>
+          <div className="settings-page-grid">
+            <div className="settings-page-grid__col settings-page-grid__col--controls">
               <label className="toggle-row">
                 <input
                   type="checkbox"
-                  checked={settings.showConflictAlerts}
+                  checked={settings.compactCalendar}
                   onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, showConflictAlerts: event.target.checked }))
+                    setSettings((prev) => ({ ...prev, compactCalendar: event.target.checked }))
                   }
                 />
-                Enable conflict alerts
+                Focus week view on your schedule
               </label>
               <p className="muted settings-hint">
-                When off, schedule-overlap toasts are hidden (enrollment add blocked; planning still allows overlap but
-                won’t toast). The planning conflict list on the page still updates.
+                Crops the week view to the earliest and latest time on your schedule (courses and personal events) plus
+                one hour of padding, snapped to whole hours. Hides off-hours. Applies to Enrollment, Planning, and the
+                calendar pop-out. If nothing is on the schedule, a default 7:00 a.m.–7:00 p.m. window is used.
               </p>
               <label className="toggle-row">
                 <input
                   type="checkbox"
-                  checked={settings.showReminderAlerts}
+                  checked={settings.compactCatalog}
                   onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, showReminderAlerts: event.target.checked }))
+                    setSettings((prev) => ({ ...prev, compactCatalog: event.target.checked }))
                   }
                 />
-                Enable reminder alerts
+                Compact course cards (denser list)
               </label>
               <p className="muted settings-hint">
-                When off, success toasts for adding, editing, or removing personal weekly events on your calendar are
-                suppressed (actions still apply).
+                Merges meeting and exam into one line and arranges cards in a <strong>responsive column grid</strong> (more
+                cards per row when the pane is wide; one column on narrow screens). Good for scanning long lists; turn off
+                if you prefer a single column.
               </p>
+              <details className="settings-backup">
+                <summary>Plans backup (JSON)</summary>
+                <div className="settings-backup__body">
+                  <p className="muted settings-hint">
+                    Export or replace your in-browser <strong>saved plans</strong> (not enrollment). Import overwrites
+                    the current plan list; keep a file if you need to undo.
+                  </p>
+                  <div className="settings-backup__actions">
+                    <button className="btn btn--secondary" type="button" onClick={downloadPlansJson}>
+                      Export plans (.json)
+                    </button>
+                    <button
+                      className="btn btn--subtle"
+                      type="button"
+                      onClick={() => plansFileInputRef.current?.click()}
+                    >
+                      Import plans (JSON)…
+                    </button>
+                    <input
+                      ref={plansFileInputRef}
+                      className="settings-file-input"
+                      type="file"
+                      accept="application/json,.json"
+                      aria-label="Select plans JSON file"
+                      onChange={onPlansFileSelected}
+                    />
+                  </div>
+                </div>
+              </details>
               <label className="toggle-row">
                 <input
                   type="checkbox"
-                  checked={settings.reduceInterfaceMotion}
+                  checked={settings.trackSessionStats}
                   onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, reduceInterfaceMotion: event.target.checked }))
+                    setSettings((prev) => ({ ...prev, trackSessionStats: event.target.checked }))
                   }
                 />
-                Reduce interface motion (also respects your system’s “reduced motion” when set to off)
-              </label>
-              <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
-                When the OS already requests reduced motion, the calmer experience applies even with this
-                unset.
-              </p>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.highContrast}
-                  onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, highContrast: event.target.checked }))
-                  }
-                />
-                High-contrast theme
+                Show in-app session activity counts (this visit)
               </label>
               <p className="muted settings-hint">
-                Dark background and bright text for low vision, glare, or a dim room. You can also zoom the browser; we
-                keep controls keyboard-accessible.
+                In-memory only; resets on refresh. A lightweight stand-in for analytics — not sent anywhere.
               </p>
+              {settings.trackSessionStats && (
+                <ul className="session-stats" aria-label="This visit activity">
+                  <li>Filter clears: {sessionStatsRef.current.filterClears}</li>
+                  <li>Filter preset uses: {sessionStatsRef.current.filterPresets}</li>
+                  <li>Successful enroll add clicks: {sessionStatsRef.current.enrollSuccess}</li>
+                  <li>“Import plan to enrollment” runs: {sessionStatsRef.current.planImports}</li>
+                  <li>Plan JSON exports: {sessionStatsRef.current.planExportDownloads}</li>
+                  <li>Plan JSON imports: {sessionStatsRef.current.planImportUploads}</li>
+                </ul>
+              )}
+              <details className="settings-advanced">
+                <summary>Alerts, motion, and contrast (show more)</summary>
+                <div className="settings-advanced__body">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.showConflictAlerts}
+                      onChange={(event) =>
+                        setSettings((prev) => ({ ...prev, showConflictAlerts: event.target.checked }))
+                      }
+                    />
+                    Enable conflict alerts
+                  </label>
+                  <p className="muted settings-hint">
+                    When off, schedule-overlap toasts are hidden (enrollment add blocked; planning still allows overlap
+                    but won’t toast). The planning conflict list on the page still updates.
+                  </p>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.showReminderAlerts}
+                      onChange={(event) =>
+                        setSettings((prev) => ({ ...prev, showReminderAlerts: event.target.checked }))
+                      }
+                    />
+                    Enable reminder alerts
+                  </label>
+                  <p className="muted settings-hint">
+                    When off, success toasts for adding, editing, or removing personal weekly events on your calendar are
+                    suppressed (actions still apply).
+                  </p>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.reduceInterfaceMotion}
+                      onChange={(event) =>
+                        setSettings((prev) => ({ ...prev, reduceInterfaceMotion: event.target.checked }))
+                      }
+                    />
+                    Reduce interface motion (also respects your system’s “reduced motion” when set to off)
+                  </label>
+                  <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
+                    When the OS already requests reduced motion, the calmer experience applies even with this unset.
+                  </p>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.highContrast}
+                      onChange={(event) =>
+                        setSettings((prev) => ({ ...prev, highContrast: event.target.checked }))
+                      }
+                    />
+                    High-contrast theme
+                  </label>
+                  <p className="muted settings-hint">
+                    Dark background and bright text for low vision, glare, or a dim room. You can also zoom the browser;
+                    we keep controls keyboard-accessible.
+                  </p>
+                </div>
+              </details>
             </div>
-          </details>
+            <div className="settings-page-grid__col settings-page-grid__col--help">
+              <h3 className="settings-help-heading">Keyboard and tips</h3>
+              <p className="muted settings-help-lead">Keyboard shortcuts and quick tips for the prototype.</p>
+              <div className="settings-help-box">
+                <HelpTipsList />
+              </div>
+            </div>
+          </div>
           <p className="muted settings-doc-link">
-            Principles and a living backlog: <code>hci-ui-suggestions.md</code>. Roadmap: <code>tasks.md</code>.
+            UI principles in <code>hci-ui-suggestions.md</code> · roadmap in <code>tasks.md</code>.
           </p>
         </section>
       )}
@@ -1983,6 +2465,14 @@ function App() {
           onClose={() => setSelectedCourse(null)}
           actions={
             <>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => downloadCourseIcs(selectedCourse)}
+                title="Mock semester start Jan 12, 2026"
+              >
+                Download .ics (mock)
+              </button>
               <button className="btn btn--subtle" type="button" onClick={() => setSelectedCourse(null)}>
                 Close
               </button>
@@ -2033,18 +2523,18 @@ function App() {
             </div>
             <div className="course-detail__section">
               <h4 className="course-detail__label">Syllabus</h4>
-              {selectedCourse.syllabusUrl ? (
-                <p className="course-detail__value">
-                  <a href={selectedCourse.syllabusUrl} target="_blank" rel="noreferrer">
-                    Open course syllabus
-                  </a>{" "}
-                  <span className="muted">(mock link)</span>
-                </p>
-              ) : (
-                <p className="course-detail__value muted">
-                  No syllabus in this mock catalog. In production this would point to the LMS or department site.
-                </p>
-              )}
+              <p className="course-detail__value">
+                <a
+                  href={selectedCourse.syllabusUrl || "#"}
+                  className="mock-syllabus-link"
+                  onClick={(e) => e.preventDefault()}
+                >
+                  Open syllabus (mock link)
+                </a>
+              </p>
+              <p className="muted course-detail__fine">
+                Placeholder only — the URL is not a real page. Use the mock .ics download for calendar experiments.
+              </p>
             </div>
             <div className="course-detail__section">
               <h4 className="course-detail__label">Instructor</h4>
@@ -2078,30 +2568,61 @@ function App() {
         </Modal>
       )}
 
-      {helpOpen && (
+      {importSummaryModal && (
         <Modal
-          title="Tips and keyboard"
-          onClose={() => setHelpOpen(false)}
+          title="Import to enrollment — summary"
+          onClose={() => setImportSummaryModal(null)}
           actions={
-            <button className="btn btn--primary" type="button" onClick={() => setHelpOpen(false)}>
-              Got it
-            </button>
+            <>
+              <button className="btn btn--subtle" type="button" onClick={() => setImportSummaryModal(null)}>
+                Close
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  setImportSummaryModal(null)
+                  setActiveView("dashboard")
+                }}
+              >
+                View week calendar
+              </button>
+            </>
           }
         >
-          <ul className="help-tips">
-            <li>
-              Press <kbd>?</kbd> (on many US keyboards: <kbd>Shift</kbd>+<kbd>/</kbd>) to open or close this panel when
-              you are <strong>not</strong> focused in a text field.
-            </li>
-            <li>
-              Press <kbd>Esc</kbd> to close any dialog, including this one and course details.
-            </li>
-            <li>
-              Use the top navigation: <strong>Enrollment</strong> to search and enroll, <strong>Planning</strong> to try
-              alternate course sets, <strong>Settings</strong> for the calendar view and high contrast.
-            </li>
-            <li>Download a <strong>week</strong> file (Enrollment → weekly calendar) to check your plan on a phone or desktop calendar app.</li>
-          </ul>
+          <p className="import-summary__lead">
+            Plan <strong>“{importSummaryModal.planName}”</strong> — {importSummaryModal.addedCount} course
+            {importSummaryModal.addedCount === 1 ? "" : "s"} added to enrollment (when rules allowed). Skipped rows show
+            why.
+          </p>
+          <div className="import-summary__table-wrap">
+            <table className="import-summary__table">
+              <thead>
+                <tr>
+                  <th scope="col">Course</th>
+                  <th scope="col">Title</th>
+                  <th scope="col">Result</th>
+                  <th scope="col">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importSummaryModal.rows.map((row) => (
+                  <tr key={row.id}>
+                    <th scope="row">{row.id}</th>
+                    <td>{row.title}</td>
+                    <td>
+                      {row.result === "enrolled" ? (
+                        <span className="import-summary__ok">enrolled</span>
+                      ) : (
+                        <span className="import-summary__skip">skipped</span>
+                      )}
+                    </td>
+                    <td>{row.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Modal>
       )}
 
@@ -2123,7 +2644,8 @@ function App() {
           <p>{confirmState.message}</p>
         </Modal>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 

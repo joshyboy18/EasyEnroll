@@ -1,4 +1,4 @@
-import { scheduleColumnDays } from "./conflicts.js"
+import { scheduleColumnDays, toMinutes } from "./conflicts.js"
 
 const ICAL_DOW = {
   Monday: "MO",
@@ -45,18 +45,13 @@ function formatIcsDateTime(d) {
 
 /**
  * @param {Array<Record<string, unknown>>} blocks
- * @param {string} [calName]
- * @param {number} [weekCount] recurring count
+ * @param {string} calName
+ * @param {number} weekCount
+ * @param {Date} anchorMonday
  */
-export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16) {
-  if (!blocks || blocks.length === 0) {
-    return null
-  }
-
+function buildWeekForAnchorMonday(blocks, calName, weekCount, anchorMonday) {
   const seen = new Set()
-  const monday = startOfWeekMonday(new Date())
   const eventLines = []
-
   for (const b of blocks) {
     if (seen.has(b.id)) {
       continue
@@ -71,23 +66,21 @@ export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16
       continue
     }
     seen.add(b.id)
-    const start = new Date(monday)
+    const start = new Date(anchorMonday)
     start.setDate(start.getDate() + col)
     const sh = Math.floor(b.startMin / 60)
     const sm = b.startMin % 60
     start.setHours(sh, sm, 0, 0)
-    const end = new Date(monday)
+    const end = new Date(anchorMonday)
     end.setDate(end.getDate() + col)
     const eh = Math.floor(b.endMin / 60)
     const em = b.endMin % 60
     end.setHours(eh, em, 0, 0)
-
     const title =
       b.kind === "course"
         ? `${b.blockCode || b.label} — ${b.blockTitle || b.sub}`.trim()
         : b.blockTitle || b.label
     const desc = [b.sub, b.timeLine].filter(Boolean).join(" · ")
-
     const uid = `${String(b.id).replace(/@/g, "-at-")}@easyenroll.local`
     eventLines.push(
       "BEGIN:VEVENT",
@@ -101,11 +94,9 @@ export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16
       "END:VEVENT",
     )
   }
-
   if (eventLines.length === 0) {
     return null
   }
-
   const header = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -115,6 +106,18 @@ export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16
     `X-WR-CALNAME:${escapeIcsText(calName)}`,
   ]
   return [...header, ...eventLines, "END:VCALENDAR"].join("\r\n")
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} blocks
+ * @param {string} [calName]
+ * @param {number} [weekCount] recurring count
+ */
+export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16) {
+  if (!blocks || blocks.length === 0) {
+    return null
+  }
+  return buildWeekForAnchorMonday(blocks, calName, weekCount, startOfWeekMonday(new Date()))
 }
 
 export function downloadIcsFile(icsString, filename = "schedule.ics") {
@@ -129,4 +132,62 @@ export function downloadIcsFile(icsString, filename = "schedule.ics") {
   a.rel = "noopener"
   a.click()
   URL.revokeObjectURL(url)
+}
+
+/** Mock Spring 2026 term: week 1 starts Monday Jan 12 (local), 16 weeks — not official registrar data. */
+export const MOCK_SEMESTER_START_MONDAY = new Date(2026, 0, 12, 0, 0, 0, 0)
+
+const DEFAULT_SEMESTER_WEEKS = 16
+
+/**
+ * @param {Array<Record<string, unknown>>} blocks
+ * @param {string} [calName]
+ * @param {number} [weekCount]
+ */
+export function buildSemesterScheduleIcs(
+  blocks,
+  calName = "My schedule (semester — mock dates)",
+  weekCount = DEFAULT_SEMESTER_WEEKS,
+) {
+  if (!blocks || blocks.length === 0) {
+    return null
+  }
+  const monday = new Date(MOCK_SEMESTER_START_MONDAY)
+  monday.setHours(0, 0, 0, 0)
+  return buildWeekForAnchorMonday(blocks, calName, weekCount, monday)
+}
+
+/**
+ * @param {{ id: string, title: string, meetingTimes: Array<{ day: string, start: string, end: string }> }} course
+ * @param {string} [calName]
+ * @param {number} [weekCount]
+ */
+export function buildSingleCourseIcs(course, calName, weekCount = DEFAULT_SEMESTER_WEEKS) {
+  if (!course?.meetingTimes?.length) {
+    return null
+  }
+  const monday = new Date(MOCK_SEMESTER_START_MONDAY)
+  monday.setHours(0, 0, 0, 0)
+  const name = calName || `${course.id} — ${course.title} (mock semester)`
+  const fakeBlocks = []
+  for (const m of course.meetingTimes) {
+    if (!m.day) {
+      continue
+    }
+    fakeBlocks.push({
+      id: `ics-${course.id}-${m.day}-${m.start}`,
+      columnDay: m.day,
+      startMin: toMinutes(m.start),
+      endMin: toMinutes(m.end),
+      kind: "course",
+      blockCode: course.id,
+      blockTitle: course.title,
+      sub: course.title,
+      timeLine: "",
+    })
+  }
+  if (fakeBlocks.length === 0) {
+    return null
+  }
+  return buildWeekForAnchorMonday(fakeBlocks, name, weekCount, monday)
 }
