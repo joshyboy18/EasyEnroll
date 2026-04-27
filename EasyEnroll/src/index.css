@@ -1,8 +1,10 @@
 :root {
+  color-scheme: light;
   --bg: #f0f8ef;
   --bg-panel: #ffffff;
   --text: #123321;
-  --muted: #52715f;
+  /* Secondary body text: darker than before for small type on pale green / white */
+  --muted: #3a5345;
   --primary: #1f8f4c;
   --primary-strong: #176e3a;
   --danger: #b43f32;
@@ -46,10 +48,12 @@ textarea {
 }
 
 html.high-contrast {
+  color-scheme: dark;
   --bg: #0b0f0c;
   --bg-panel: #121815;
   --text: #f2f7f2;
-  --muted: #a8b8a8;
+  /* Readable secondary text on dark surfaces (#121815 / #1a211c) */
+  --muted: #c8d8c8;
   --primary: #4cd686;
   --primary-strong: #7ae8a4;
   --danger: #ff8a7a;

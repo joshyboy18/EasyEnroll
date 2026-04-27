@@ -64,6 +64,10 @@ export function getEventConflicts(candidate, events) {
   return conflicts
 }
 
+/**
+ * Pairwise time overlaps between courses, plus each course vs weekly personal events.
+ * Pass the full set of courses shown on a grid (e.g. enrolled ∪ plan-only for Planning).
+ */
 export function detectPlanConflicts(planCourses, events) {
   const conflicts = []
   for (let i = 0; i < planCourses.length; i += 1) {

@@ -5,6 +5,13 @@ import { useToast } from "./components/ToastStack.jsx"
 import { loginWithPassword, loginWithSso } from "./utils/auth"
 import { buildTimeGridBlocks, getViewWindowFromBlocks, popoutHtmlForGrid } from "./utils/calendarLayout.js"
 import { courses } from "./data/courses"
+import {
+  DEFAULT_PLANNING_TARGET_TERM_ID,
+  ENROLLMENT_TERM_LABEL,
+  getPlanningTermOption,
+  normalizePlanningContext,
+  PLANNING_TERM_OPTIONS,
+} from "./data/planningTerms.js"
 import { mockUsers } from "./data/mockUsers"
 import {
   detectPlanConflicts,
@@ -29,13 +36,53 @@ import { attachOpaqueCourseDrag, endCourseCardDrag } from "./utils/courseDrag.js
 import { buildSemesterScheduleIcs, buildSingleCourseIcs, buildWeekScheduleIcs, downloadIcsFile } from "./utils/ics.js"
 
 const MAX_CREDITS = 19
+/** Shown when a planning add would exceed the credit cap (mirrors enrollment policy). */
+const PLANNING_CREDIT_CAP_MESSAGE = `Plans are limited to ${MAX_CREDITS} credit hours without academic advisor approval. To take more, speak with your advisor.`
+const PLANNING_CONFLICTS_INITIAL = 8
 const SCHOOL_EMAIL_DOMAIN = "@school.edu"
 
 const VIEW_WAYFINDING = {
   dashboard: "Enrollment — search the catalog, manage your term, and see your week.",
-  planning: "Planning — try alternate schedules before you enroll; compare to your current classes.",
+  planning:
+    "Planning — draft a future-term schedule (mock); enrolled blocks on the grid are this term for comparison only.",
   profile: "Profile — identity fields and how this mock handles university policy.",
   settings: "Settings — display, alerts, and accessibility for the planner.",
+}
+
+const LS_ONBOARD_ENROLLMENT = "easyenroll.dismissOnboarding.enrollment"
+const LS_ONBOARD_PLANNING = "easyenroll.dismissOnboarding.planning"
+/** @deprecated kept in sync when enrollment onboarding is dismissed */
+const LS_DISMISS_WELCOME_LEGACY = "easyenroll.dismissWelcome"
+
+function enrollmentOnboardingInitiallyDismissed() {
+  if (typeof localStorage === "undefined") {
+    return false
+  }
+  if (localStorage.getItem(LS_ONBOARD_ENROLLMENT) === "1") {
+    return true
+  }
+  return localStorage.getItem(LS_DISMISS_WELCOME_LEGACY) === "1"
+}
+
+function persistEnrollmentOnboardingDismissed() {
+  try {
+    localStorage.setItem(LS_ONBOARD_ENROLLMENT, "1")
+    localStorage.setItem(LS_DISMISS_WELCOME_LEGACY, "1")
+  } catch {
+    /* ignore */
+  }
+}
+
+function planningOnboardingInitiallyDismissed() {
+  return typeof localStorage !== "undefined" && localStorage.getItem(LS_ONBOARD_PLANNING) === "1"
+}
+
+function persistPlanningOnboardingDismissed() {
+  try {
+    localStorage.setItem(LS_ONBOARD_PLANNING, "1")
+  } catch {
+    /* ignore */
+  }
 }
 
 const EVENT_COLOR_PRESETS = ["#1f8f4c", "#2f6fcb", "#7a3d8c", "#b85c0a", "#0d4a4a", "#6b1d3d"]
@@ -106,6 +153,7 @@ function CourseCard({
   draggable,
   actionVariant = "primary",
   actionDisabled = false,
+  actionTitle,
   compact = false,
 }) {
   return (
@@ -166,9 +214,62 @@ function CourseCard({
           onAdd(course)
         }}
         disabled={actionDisabled}
+        title={actionTitle || undefined}
       >
         {addLabel}
       </button>
+    </article>
+  )
+}
+
+function PlanningConflictCard({ conflict, courses }) {
+  if (conflict.type === "course") {
+    const ca = courses.find((c) => c.id === conflict.a)
+    const cb = courses.find((c) => c.id === conflict.b)
+    return (
+      <article
+        className="planning-conflict-card planning-conflict-card--course"
+        aria-label={`Time overlap: ${conflict.a} and ${conflict.b}`}
+      >
+        <span className="planning-conflict-card__kind">Class vs class</span>
+        <div className="planning-conflict-card__pair">
+          <div className="planning-conflict-card__side">
+            <span className="planning-conflict-card__code">{conflict.a}</span>
+            <span className="planning-conflict-card__title">{ca?.title ?? ""}</span>
+          </div>
+          <span className="planning-conflict-card__vs" aria-hidden="true">
+            overlaps
+          </span>
+          <div className="planning-conflict-card__side">
+            <span className="planning-conflict-card__code">{conflict.b}</span>
+            <span className="planning-conflict-card__title">{cb?.title ?? ""}</span>
+          </div>
+        </div>
+      </article>
+    )
+  }
+  const ca = courses.find((c) => c.id === conflict.a)
+  return (
+    <article
+      className="planning-conflict-card planning-conflict-card--event"
+      aria-label={`Time overlap: ${conflict.a} with event ${conflict.bTitle || conflict.b}`}
+    >
+      <span className="planning-conflict-card__kind">Class vs event</span>
+      <div className="planning-conflict-card__pair planning-conflict-card__pair--event">
+        <div className="planning-conflict-card__side">
+          <span className="planning-conflict-card__code">{conflict.a}</span>
+          <span className="planning-conflict-card__title">{ca?.title ?? ""}</span>
+        </div>
+        <span className="planning-conflict-card__vs" aria-hidden="true">
+          overlaps
+        </span>
+        <div className="planning-conflict-card__side planning-conflict-card__side--event">
+          <span className="planning-conflict-card__code planning-conflict-card__code--event">
+            {conflict.bTitle || conflict.b}
+          </span>
+          <span className="planning-conflict-card__meta">Personal weekly event</span>
+        </div>
+      </div>
     </article>
   )
 }
@@ -403,8 +504,17 @@ function App() {
   const [comparePlanAId, setComparePlanAId] = useState(null)
   const [comparePlanBId, setComparePlanBId] = useState(null)
   const [comparePlansOpen, setComparePlansOpen] = useState(false)
-  const [welcomeDismissed, setWelcomeDismissed] = useState(
-    () => typeof localStorage !== "undefined" && localStorage.getItem("easyenroll.dismissWelcome") === "1",
+  const [planningConflictsExpanded, setPlanningConflictsExpanded] = useState(false)
+  const [enrollmentOnboardingDismissed, setEnrollmentOnboardingDismissed] = useState(
+    enrollmentOnboardingInitiallyDismissed,
+  )
+  const [planningOnboardingDismissed, setPlanningOnboardingDismissed] = useState(
+    planningOnboardingInitiallyDismissed,
+  )
+  const [planningContext, setPlanningContext] = useState(() =>
+    initialUser
+      ? normalizePlanningContext(loadUserBucket(initialUser.id, "planningContext", null))
+      : { targetTermId: DEFAULT_PLANNING_TARGET_TERM_ID },
   )
 
   const [eventForm, setEventForm] = useState({
@@ -418,6 +528,8 @@ function App() {
   })
 
   const popupRef = useRef(null)
+  /** @type {React.MutableRefObject<"enrollment" | "planning">} */
+  const calendarPopoutSourceRef = useRef("enrollment")
   const keyboardLayerRef = useRef({})
   const sessionStatsRef = useRef({
     filterClears: 0,
@@ -444,6 +556,11 @@ function App() {
   )
 
   const classYear = currentUser?.classYear ?? 1
+
+  const planningTermOption = useMemo(
+    () => getPlanningTermOption(planningContext.targetTermId),
+    [planningContext.targetTermId],
+  )
 
   const plansDirty = useMemo(
     () => JSON.stringify(plans) !== lastSavedPlansJson,
@@ -486,7 +603,15 @@ function App() {
     setPlans(nextPlans)
     setLastSavedPlansJson(JSON.stringify(nextPlans))
     setActivePlanId(nextPlans[0]?.id ?? null)
+    setPlanningContext(normalizePlanningContext(loadUserBucket(user.id, "planningContext", null)))
   }
+
+  useEffect(() => {
+    if (!currentUser) {
+      return
+    }
+    saveUserBucket(currentUser.id, "planningContext", planningContext)
+  }, [currentUser, planningContext])
 
   useEffect(() => {
     if (!currentUser) {
@@ -709,6 +834,16 @@ function App() {
     [plannedCourses],
   )
 
+  /** Courses whose meetings appear on the Planning calendar (enrolled + plan-only stripes). */
+  const planningGridCourses = useMemo(() => {
+    if (!activePlan) {
+      return enrolledCourses
+    }
+    const enr = new Set(enrolledIds)
+    const plannedOnly = plannedCourses.filter((c) => !enr.has(c.id))
+    return [...enrolledCourses, ...plannedOnly]
+  }, [activePlan, enrolledCourses, enrolledIds, plannedCourses])
+
   const dashboardBlocks = useMemo(
     () => buildTimeGridBlocks({ enrolledCourses, events, plannedOnly: [] }),
     [enrolledCourses, events],
@@ -737,17 +872,34 @@ function App() {
     if (!pop || pop.closed || !currentUser) {
       return
     }
+    const src = calendarPopoutSourceRef.current
+    const blocks = src === "planning" ? planningCalendarBlocks : dashboardBlocks
+    const vw = src === "planning" ? planningViewWindow : dashboardViewWindow
+    const termOpt = getPlanningTermOption(planningContext.targetTermId)
+    const caption =
+      src === "planning"
+        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL} mock) + personal weekly events; striped: courses only in the active plan.`
+        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL} mock) — matches the main Enrollment calendar.`
     const html = popoutHtmlForGrid(
       currentUser.name,
-      dashboardBlocks,
+      blocks,
       scheduleColumnDays,
-      dashboardViewWindow.viewStartMin,
-      dashboardViewWindow.viewEndMin,
+      vw.viewStartMin,
+      vw.viewEndMin,
+      caption,
     )
     pop.document.open()
     pop.document.write(html)
     pop.document.close()
-  }, [dashboardBlocks, currentUser, dashboardViewWindow, settings.compactCalendar])
+  }, [
+    dashboardBlocks,
+    planningCalendarBlocks,
+    currentUser,
+    dashboardViewWindow,
+    planningViewWindow,
+    settings.compactCalendar,
+    planningContext.targetTermId,
+  ])
 
   useEffect(() => {
     const onBeforeUnload = (e) => {
@@ -808,6 +960,46 @@ function App() {
     }
     downloadIcsFile(ics, "easyenroll-semester.ics")
     pushToast("success", "Downloaded a semester-anchored .ics (mock start Jan 12, 2026; not from registrar).")
+  }
+
+  const downloadPlanningWeekIcs = () => {
+    if (!currentUser) {
+      return
+    }
+    const label = planningTermOption.label
+    const ics = buildWeekScheduleIcs(
+      planningCalendarBlocks,
+      `Easy Enroll — ${currentUser.name} (planning draft: ${label}; mock week export)`,
+    )
+    if (!ics) {
+      pushToast("error", "Nothing on this planning grid to export yet.")
+      return
+    }
+    downloadIcsFile(ics, `easyenroll-planning-${planningTermOption.id}-week.ics`)
+    pushToast(
+      "success",
+      `Downloaded week .ics for planning target “${label}” (mock recurring week; not registrar data).`,
+    )
+  }
+
+  const downloadPlanningSemesterIcs = () => {
+    if (!currentUser) {
+      return
+    }
+    const label = planningTermOption.label
+    const ics = buildSemesterScheduleIcs(
+      planningCalendarBlocks,
+      `Easy Enroll — ${currentUser.name} (planning draft ${label}; mock semester anchor)`,
+    )
+    if (!ics) {
+      pushToast("error", "Nothing on this planning grid to export yet.")
+      return
+    }
+    downloadIcsFile(ics, `easyenroll-planning-${planningTermOption.id}-semester.ics`)
+    pushToast(
+      "success",
+      `Downloaded semester .ics for planning target “${label}” (mock Jan 12, 2026 anchor; not registrar).`,
+    )
   }
 
   const downloadCourseIcs = (course) => {
@@ -974,6 +1166,10 @@ function App() {
       pushToast("error", `${course.id} is already in this plan.`)
       return
     }
+    if (plannedCredits + course.credits > MAX_CREDITS) {
+      pushToast("error", PLANNING_CREDIT_CAP_MESSAGE)
+      return
+    }
 
     const other = plannedCourses
     const classHit = hasCourseConflict(course, other)
@@ -987,7 +1183,10 @@ function App() {
         parts.push(`overlaps with ${evHits.map((e) => `"${e.title}"`).join(", ")}`)
       }
       if (settings.showConflictAlerts) {
-        pushToast("error", `${course.id} conflicts with your schedule: ${parts.join(" and ")}.`)
+        pushToast(
+          "error",
+          `${course.id} overlaps on this grid (enrolled ${ENROLLMENT_TERM_LABEL}, personal events, or other plan courses): ${parts.join(" and ")}.`,
+        )
       }
     }
 
@@ -1082,8 +1281,8 @@ function App() {
       pushToast(
         "success",
         tableRows.filter((r) => r.result === "skipped").length === 0
-          ? `Imported ${addedCount} course(s) into your enrollment.`
-          : `Imported ${addedCount} course(s). Open the table for skip reasons.`,
+          ? `Imported ${addedCount} course(s) into current-term enrollment (${ENROLLMENT_TERM_LABEL} mock).`
+          : `Imported ${addedCount} course(s) into enrollment (${ENROLLMENT_TERM_LABEL} mock). Open the table for skip reasons.`,
         {
           label: "View week calendar",
           onAction: () => setActiveView("dashboard"),
@@ -1148,7 +1347,39 @@ function App() {
     event.target.value = ""
   }
 
-  const planningConflicts = useMemo(() => detectPlanConflicts(plannedCourses, events), [plannedCourses, events])
+  const planningConflicts = useMemo(
+    () => detectPlanConflicts(planningGridCourses, events),
+    [planningGridCourses, events],
+  )
+
+  const sortedPlanningConflicts = useMemo(() => {
+    const courseCourse = planningConflicts.filter((c) => c.type === "course")
+    const courseEvent = planningConflicts.filter((c) => c.type === "event")
+    return [...courseCourse, ...courseEvent]
+  }, [planningConflicts])
+
+  const planningConflictCounts = useMemo(
+    () => ({
+      course: planningConflicts.filter((c) => c.type === "course").length,
+      event: planningConflicts.filter((c) => c.type === "event").length,
+    }),
+    [planningConflicts],
+  )
+
+  const planningConflictsVisible = useMemo(() => {
+    if (planningConflictsExpanded || sortedPlanningConflicts.length <= PLANNING_CONFLICTS_INITIAL) {
+      return sortedPlanningConflicts
+    }
+    return sortedPlanningConflicts.slice(0, PLANNING_CONFLICTS_INITIAL)
+  }, [planningConflictsExpanded, sortedPlanningConflicts])
+
+  const planningConflictsHiddenCount = sortedPlanningConflicts.length - planningConflictsVisible.length
+
+  useEffect(() => {
+    if (sortedPlanningConflicts.length <= PLANNING_CONFLICTS_INITIAL) {
+      setPlanningConflictsExpanded(false)
+    }
+  }, [sortedPlanningConflicts.length])
 
   const planCompare = useMemo(() => {
     if (plans.length < 1) {
@@ -1249,29 +1480,40 @@ function App() {
     setActivePlanId(null)
     setLastSavedPlansJson("[]")
     setActiveView("dashboard")
+    setPlanningContext({ targetTermId: DEFAULT_PLANNING_TARGET_TERM_ID })
+    calendarPopoutSourceRef.current = "enrollment"
   }
 
-  const openCalendarPopout = () => {
+  const openCalendarPopout = (source = "enrollment") => {
     if (!currentUser) {
       return
     }
+    calendarPopoutSourceRef.current = source
     const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=800")
     if (!popup) {
       pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
       return
     }
     popupRef.current = popup
+    const blocks = source === "planning" ? planningCalendarBlocks : dashboardBlocks
+    const vw = source === "planning" ? planningViewWindow : dashboardViewWindow
+    const termOpt = getPlanningTermOption(planningContext.targetTermId)
+    const caption =
+      source === "planning"
+        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL} mock) + personal weekly events; striped: courses only in the active plan.`
+        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL} mock) — matches the main Enrollment calendar.`
     const html = popoutHtmlForGrid(
       currentUser.name,
-      dashboardBlocks,
+      blocks,
       scheduleColumnDays,
-      dashboardViewWindow.viewStartMin,
-      dashboardViewWindow.viewEndMin,
+      vw.viewStartMin,
+      vw.viewEndMin,
+      caption,
     )
     popup.document.open()
     popup.document.write(html)
     popup.document.close()
-    pushToast("success", "Calendar pop-out opened.")
+    pushToast("success", source === "planning" ? "Planning calendar pop-out opened." : "Calendar pop-out opened.")
   }
 
   if (!session || !currentUser) {
@@ -1299,7 +1541,11 @@ function App() {
         <header className="app-topbar">
         <div>
           <h1>Easy Enroll</h1>
-          <p className="app-wayfinding muted">{VIEW_WAYFINDING[activeView]}</p>
+          <p className="app-wayfinding muted">
+            {activeView === "planning"
+              ? `Planning — target ${planningTermOption.shortLabel} (mock). Not registered until you import on Enrollment (${ENROLLMENT_TERM_LABEL} mock). Solid = this term + events; striped = plan-only.`
+              : VIEW_WAYFINDING[activeView]}
+          </p>
           <p>
             {profile.name || currentUser.name} | {profile.emailLocal || "student"}
             {SCHOOL_EMAIL_DOMAIN}
@@ -1343,23 +1589,35 @@ function App() {
 
       <ToastContainer />
 
-      {!welcomeDismissed && activeView === "dashboard" && (
-        <div className="onboarding-notice" role="region" aria-label="Getting started">
-          <p>
-            <strong>First time here?</strong> Drag courses into your enrolled list, open <strong>Planning</strong> to try
-            alternate sets, and use <strong>Settings</strong> for calendar focus and contrast. This banner is a one-time
-            mock coach mark.
-          </p>
+      {!enrollmentOnboardingDismissed && activeView === "dashboard" && (
+        <div className="onboarding-notice" role="region" aria-label="Getting started with enrollment">
+          <div className="onboarding-notice__body">
+            <p className="onboarding-notice__title">
+              <strong>Quick tips</strong> <span className="muted">(one-time coach marks — mock prototype)</span>
+            </p>
+            <ul className="onboarding-notice__list">
+              <li>
+                <strong>Drag</strong> from <em>Available Courses</em> to the <em>Enrolled Courses</em> drop zone, or use{" "}
+                <strong>Add</strong> on a card.
+              </li>
+              <li>
+                <strong>Click</strong> a course card to open details, syllabus (mock link), and calendar export.
+              </li>
+              <li>
+                Use <strong>Recommended</strong> above for year-aware suggestions; chips and search refine the catalog.
+              </li>
+              <li>
+                Open <strong>Planning</strong> to draft alternate schedules without changing enrollment;{" "}
+                <strong>Settings</strong> has calendar focus, contrast, and keyboard tips.
+              </li>
+            </ul>
+          </div>
           <button
             className="btn btn--subtle"
             type="button"
             onClick={() => {
-              try {
-                localStorage.setItem("easyenroll.dismissWelcome", "1")
-              } catch {
-                /* ignore */
-              }
-              setWelcomeDismissed(true)
+              persistEnrollmentOnboardingDismissed()
+              setEnrollmentOnboardingDismissed(true)
             }}
           >
             Dismiss
@@ -1551,7 +1809,11 @@ function App() {
                 >
                   Add weekly event
                 </button>
-                <button className="btn btn--secondary" type="button" onClick={openCalendarPopout}>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={() => openCalendarPopout("enrollment")}
+                >
                   Open pop-out calendar
                 </button>
                 <button
@@ -1573,7 +1835,8 @@ function App() {
               </div>
             </header>
             <p className="muted calendar-hint">
-              Enrolled courses use solid colors. Click a block for course details or to edit a personal event. Week and
+              Enrolled courses use solid colors. Click a block for course details or to edit a personal event. When two
+              blocks overlap in time, they split into <strong>side-by-side columns</strong> so you can see both. Week and
               semester .ics files use <strong>mock</strong> dates (see toast after download).
             </p>
             <TimeGridCalendar
@@ -1606,32 +1869,186 @@ function App() {
 
       {activeView === "planning" && (
         <section className="planning-section">
-          {plans.length === 0 ? (
-            <div className="planning-empty">
-              <h2>No plans yet</h2>
-              <p>Create a plan to use the planning studio, then add courses and compare them to your current enrollment.</p>
+          <div className="planning-term-banner" role="region" aria-label="Planning target term">
+            <div className="planning-term-banner__row">
+              <label className="planning-term-banner__label">
+                <span className="planning-term-banner__label-text">Planning draft for</span>
+                <select
+                  value={planningContext.targetTermId}
+                  onChange={(ev) =>
+                    setPlanningContext((prev) => ({ ...prev, targetTermId: ev.target.value }))
+                  }
+                  aria-label="Mock target term for this planning session"
+                >
+                  {PLANNING_TERM_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="planning-term-banner__note muted">
+                This is a <strong>what-if</strong> label only (not registrar data). The week grid still shows your{" "}
+                <strong>enrolled</strong> courses from <strong>{ENROLLMENT_TERM_LABEL}</strong> plus{" "}
+                <strong>personal events</strong> so you can spot conflicts while drafting for{" "}
+                <strong>{planningTermOption.label}</strong>.
+              </p>
+            </div>
+          </div>
+          {!planningOnboardingDismissed && (
+            <div
+              className="onboarding-notice onboarding-notice--planning"
+              role="region"
+              aria-label="Planning studio introduction"
+            >
+              <div className="onboarding-notice__body">
+                <p className="onboarding-notice__title">
+                  <strong>Planning vs Enrollment</strong>{" "}
+                  <span className="muted">(one-time — mock prototype)</span>
+                </p>
+                <ul className="onboarding-notice__list">
+                  <li>
+                    <strong>Enrollment</strong> is your mock registered schedule for this term. <strong>Planning</strong>{" "}
+                    is for what-if sets before you commit.
+                  </li>
+                  <li>
+                    On the calendar, <strong>solid</strong> blocks are enrolled courses; <strong>striped</strong> blocks
+                    are only in the active plan.
+                  </li>
+                  <li>
+                    Pick a <strong>planning target term</strong> in the banner (mock label). Import adds to{" "}
+                    <strong>{ENROLLMENT_TERM_LABEL}</strong> enrollment, not that future term’s registration.
+                  </li>
+                  <li>
+                    Use the same <strong>search and filter</strong> controls as Enrollment (below when you have a plan).
+                    Use <strong>Save plan</strong> above the weekly calendar, then <strong>Import to enrollment</strong>{" "}
+                    at the bottom when you like the result.
+                  </li>
+                  <li>
+                    Overlaps are allowed here; check the conflict list and toasts. Compare two plans with the button
+                    when you have at least two saved plans.
+                  </li>
+                  <li>
+                    Active plans are limited to <strong>{MAX_CREDITS} credits</strong> like enrollment; talk to your
+                    advisor if you need a heavier load.
+                  </li>
+                </ul>
+              </div>
               <button
-                className="btn btn--primary"
+                className="btn btn--subtle"
                 type="button"
                 onClick={() => {
-                  // eslint-disable-next-line no-alert
-                  const n = window.prompt("Plan name?", "My plan")
-                  if (n !== null) {
-                    createPlan(n)
-                  }
+                  persistPlanningOnboardingDismissed()
+                  setPlanningOnboardingDismissed(true)
                 }}
               >
-                Create your first plan
+                Dismiss
               </button>
             </div>
+          )}
+          {plans.length === 0 ? (
+            <>
+              <div className="planning-empty planning-empty--with-filters">
+                <h2>No plans yet</h2>
+                <p>
+                  Create a plan to draft courses for <strong>{planningTermOption.label}</strong>. Search and filters match
+                  the <strong>Enrollment</strong> page (shared settings). After you create a plan, the catalog and calendar
+                  layout mirror Enrollment: lists first, then your week.
+                </p>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => {
+                    // eslint-disable-next-line no-alert
+                    const n = window.prompt("Plan name?", "My plan")
+                    if (n !== null) {
+                      createPlan(n)
+                    }
+                  }}
+                >
+                  Create your first plan
+                </button>
+              </div>
+
+              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+                <input
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  type="text"
+                  placeholder="Search by course code, title, or professor"
+                />
+                <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
+                  <option value="All">All Departments</option>
+                  {[...new Set(courses.map((course) => course.department))].map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+                <select value={seatFilter} onChange={(event) => setSeatFilter(event.target.value)}>
+                  <option value="all">All seat statuses</option>
+                  <option value="open">Open seats only</option>
+                  <option value="waitlist">Waitlist only</option>
+                </select>
+                <button className="btn btn--subtle" type="button" onClick={clearFilters}>
+                  Clear Filters
+                </button>
+              </section>
+
+              <div className="filter-preset-bar" role="group" aria-label="Quick filter presets">
+                <span className="filter-preset-bar__label muted">Presets</span>
+                <button
+                  className="btn btn--chip"
+                  type="button"
+                  aria-pressed={
+                    !programOnly && seatFilter === "all" && !searchText && departmentFilter === "All"
+                  }
+                  onClick={() => applyFilterPreset("all")}
+                >
+                  All courses
+                </button>
+                <button
+                  className={`btn btn--chip${seatFilter === "open" && !programOnly ? " btn--chip-on" : ""}`}
+                  type="button"
+                  aria-pressed={seatFilter === "open" && !programOnly}
+                  onClick={() => applyFilterPreset("open")}
+                >
+                  Open seats
+                </button>
+                <button
+                  className={`btn btn--chip${programOnly ? " btn--chip-on" : ""}`}
+                  type="button"
+                  aria-pressed={programOnly}
+                  onClick={() => applyFilterPreset("programs")}
+                >
+                  My programs
+                </button>
+              </div>
+
+              <div className="enrollment-summary enrollment-summary--planning" aria-live="polite">
+                <span>
+                  <strong>Enrolled ({ENROLLMENT_TERM_LABEL}):</strong> {enrolledCredits} / {MAX_CREDITS} credits
+                </span>
+                <span>
+                  <strong>Catalog (filtered):</strong> {sortedAvailableCourses.length} course
+                  {sortedAvailableCourses.length === 1 ? "" : "s"} · {availableCatalogCredits} credits
+                </span>
+              </div>
+              <p className="muted planning-filter-hint">
+                Filters apply when you add courses to a plan. Switch to <button className="btn btn--link" type="button" onClick={() => goToView("dashboard")}>Enrollment</button> to change your registered classes.
+              </p>
+            </>
           ) : (
             <>
               <header className="planning-header">
                 <div>
                   <h2>Planning studio</h2>
                   <p className="muted">
-                    Enrolled classes are solid. Plan-only classes use diagonal striping. Conflicts are allowed; we warn you
-                    with a toast and list them below.
+                    Drafting for <strong>{planningTermOption.label}</strong> — not registration until you{" "}
+                    <strong>Import to enrollment</strong> on <strong>{ENROLLMENT_TERM_LABEL}</strong> (mock). Solid
+                    blocks: this term’s enrolled courses and your weekly personal events. Striped: courses only in the
+                    active plan. Each plan is capped at <strong>{MAX_CREDITS} credits</strong> (advisor approval to
+                    overload). Time overlaps are allowed; we toast and list them below.
                   </p>
                 </div>
                 <div className="planning-tools">
@@ -1661,16 +2078,35 @@ function App() {
                 <div className="planning-summary-strip" role="status" aria-live="polite">
                   <span>
                     <strong>{activePlan.courseIds.length}</strong> course{activePlan.courseIds.length === 1 ? "" : "s"} in
-                    “{activePlan.name}”
+                    plan “{activePlan.name}” (target {planningTermOption.shortLabel})
                   </span>
-                  <span>
-                    <strong>{plannedCredits}</strong> planned credits
+                  <span
+                    className={
+                      plannedCredits > MAX_CREDITS
+                        ? "planning-summary-strip__credits planning-summary-strip__credits--over"
+                        : plannedCredits >= MAX_CREDITS
+                          ? "planning-summary-strip__credits planning-summary-strip__credits--full"
+                          : "planning-summary-strip__credits"
+                    }
+                  >
+                    <strong>{plannedCredits}</strong> / {MAX_CREDITS} planned credits
                   </span>
                   <span>
                     <strong>{planningConflicts.length}</strong> time conflict{planningConflicts.length === 1 ? "" : "s"}{" "}
-                    in this plan
+                    on this grid (plan + enrolled + events)
+                  </span>
+                  <span className="planning-summary-strip__context muted">
+                    Enrolled courses shown are <strong>{ENROLLMENT_TERM_LABEL}</strong> (mock), not the plan’s target term.
                   </span>
                 </div>
+              )}
+
+              {activePlan && plannedCredits > MAX_CREDITS && (
+                <p className="planning-advisor-banner" role="alert">
+                  This plan is over the <strong>{MAX_CREDITS} credit</strong> mock limit (likely from an older save).
+                  Remove courses until you are at or under {MAX_CREDITS}, or work with your advisor if you need an
+                  overload.
+                </p>
               )}
 
               {plans.length < 2 && (
@@ -1792,23 +2228,251 @@ function App() {
                 </div>
               )}
 
-              <div className="planning-filters-bar" role="region" aria-label="Catalog filter connection to Enrollment">
-                <p className="planning-filters-bar__text muted">
-                  The <strong>Available courses</strong> list uses the <strong>same search and filters</strong> as
-                  Enrollment (search, department, seat, program presets). Adjust them there, or clear below.
-                </p>
-                <div className="planning-filters-bar__actions">
-                  <button className="btn btn--subtle" type="button" onClick={() => goToView("dashboard")}>
-                    Open Enrollment (filters)
-                  </button>
-                  <button className="btn btn--subtle" type="button" onClick={clearFilters}>
-                    Clear all filters
-                  </button>
-                </div>
+              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+                <input
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  type="text"
+                  placeholder="Search by course code, title, or professor"
+                />
+                <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
+                  <option value="All">All Departments</option>
+                  {[...new Set(courses.map((course) => course.department))].map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+                <select value={seatFilter} onChange={(event) => setSeatFilter(event.target.value)}>
+                  <option value="all">All seat statuses</option>
+                  <option value="open">Open seats only</option>
+                  <option value="waitlist">Waitlist only</option>
+                </select>
+                <button className="btn btn--subtle" type="button" onClick={clearFilters}>
+                  Clear Filters
+                </button>
+              </section>
+
+              <div className="filter-preset-bar" role="group" aria-label="Quick filter presets">
+                <span className="filter-preset-bar__label muted">Presets</span>
+                <button
+                  className="btn btn--chip"
+                  type="button"
+                  aria-pressed={
+                    !programOnly && seatFilter === "all" && !searchText && departmentFilter === "All"
+                  }
+                  onClick={() => applyFilterPreset("all")}
+                >
+                  All courses
+                </button>
+                <button
+                  className={`btn btn--chip${seatFilter === "open" && !programOnly ? " btn--chip-on" : ""}`}
+                  type="button"
+                  aria-pressed={seatFilter === "open" && !programOnly}
+                  onClick={() => applyFilterPreset("open")}
+                >
+                  Open seats
+                </button>
+                <button
+                  className={`btn btn--chip${programOnly ? " btn--chip-on" : ""}`}
+                  type="button"
+                  aria-pressed={programOnly}
+                  onClick={() => applyFilterPreset("programs")}
+                >
+                  My programs
+                </button>
               </div>
 
-              <div className="planning-calendar-wrap">
-                <h3 className="planning-cal-title">Calendar (enrolled + this plan)</h3>
+              <div className="enrollment-summary enrollment-summary--planning" aria-live="polite">
+                <span>
+                  <strong>Enrolled ({ENROLLMENT_TERM_LABEL}):</strong> {enrolledCredits} / {MAX_CREDITS} credits
+                </span>
+                <span>
+                  <strong>Catalog (filtered):</strong> {sortedAvailableCourses.length} course
+                  {sortedAvailableCourses.length === 1 ? "" : "s"} · {availableCatalogCredits} credits
+                </span>
+                {activePlan && (
+                  <span>
+                    <strong>Active plan:</strong> {activePlan.courseIds.length} course
+                    {activePlan.courseIds.length === 1 ? "" : "s"} · {plannedCredits} / {MAX_CREDITS} planned credits (
+                    {planningTermOption.shortLabel})
+                  </span>
+                )}
+              </div>
+
+              <p className="muted planning-studio-familiarity-hint">
+                Same controls as <strong>Enrollment</strong> — lists first, then the week grid.{" "}
+                <button className="btn btn--link" type="button" onClick={() => goToView("dashboard")}>
+                  Open Enrollment
+                </button>{" "}
+                to edit registration.
+              </p>
+
+              <section className="pane-grid">
+                <article className="pane">
+                  <header>
+                    <h2>Available Courses</h2>
+                    <p>Click for details. Drag to the plan or use Add to plan.</p>
+                  </header>
+                  <div
+                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+                  >
+                    {sortedAvailableCourses.length === 0 && (
+                      <p className="muted" role="status">
+                        No courses match your filters. Try{" "}
+                        <button className="btn btn--link" type="button" onClick={clearFilters}>
+                          clearing filters
+                        </button>{" "}
+                        or changing department and seat options.
+                      </p>
+                    )}
+                    {sortedAvailableCourses.map((course) => {
+                      const inPlan = Boolean(activePlan?.courseIds.includes(course.id))
+                      const blockedByCap = Boolean(
+                        activePlan && !inPlan && plannedCredits + course.credits > MAX_CREDITS,
+                      )
+                      return (
+                        <CourseCard
+                          key={`${course.id}-planner`}
+                          course={course}
+                          degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
+                          onOpen={setSelectedCourse}
+                          onAdd={addToPlan}
+                          addLabel="Add to plan"
+                          compact={settings.compactCatalog}
+                          actionVariant="secondary"
+                          actionDisabled={!activePlan || inPlan || blockedByCap}
+                          actionTitle={
+                            blockedByCap
+                              ? PLANNING_CREDIT_CAP_MESSAGE
+                              : !activePlan
+                                ? "Select or create a plan first."
+                                : inPlan
+                                  ? "Already in this plan."
+                                  : undefined
+                          }
+                          draggable
+                        />
+                      )
+                    })}
+                  </div>
+                </article>
+
+                <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToPlan}>
+                  <header>
+                    <h2>Plan courses</h2>
+                    <p>
+                      Drop here to add to “{activePlan?.name || "plan"}”. Remove with confirmation.
+                      {activePlan && (
+                        <span className="muted">
+                          {" "}
+                          · {plannedCredits} / {MAX_CREDITS} planned credits
+                        </span>
+                      )}
+                    </p>
+                  </header>
+                  <div
+                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
+                  >
+                    {activePlan && plannedCourses.length === 0 && <p className="muted">Drag or add classes here.</p>}
+                    {plannedCourses.map((course) => (
+                      <CourseCard
+                        key={`${course.id}-planned`}
+                        course={course}
+                        degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
+                        onOpen={setSelectedCourse}
+                        onAdd={() => removeFromPlan(course.id)}
+                        addLabel="Remove"
+                        compact={settings.compactCatalog}
+                        actionVariant="danger"
+                      />
+                    ))}
+                  </div>
+                  {activePlan && (
+                    <footer className="pane-footer pane-footer--plan-credits">
+                      <strong>
+                        Plan credits: {plannedCredits} / {MAX_CREDITS} (target {planningTermOption.shortLabel})
+                      </strong>
+                      {plannedCredits >= MAX_CREDITS && (
+                        <span className="pane-footer__hint muted">
+                          {plannedCredits > MAX_CREDITS
+                            ? "Over limit — remove courses or see your advisor."
+                            : "At cap — advisor approval needed to add more."}
+                        </span>
+                      )}
+                    </footer>
+                  )}
+                </article>
+              </section>
+
+              <section className="calendar-section planning-calendar-section">
+                <header className="calendar-header planning-calendar-header">
+                  <h2 className="planning-cal-title planning-cal-title--section">
+                    Weekly calendar — enrolled ({ENROLLMENT_TERM_LABEL}) + plan ({planningTermOption.shortLabel})
+                  </h2>
+                  <div className="calendar-header__actions planning-calendar-header__actions">
+                    <div
+                      className="planning-calendar-save-group"
+                      role="group"
+                      aria-label="Save plan to browser storage"
+                    >
+                      {plansDirty && (
+                        <span className="planning-unsaved" role="status">
+                          Unsaved plan changes
+                        </span>
+                      )}
+                      <button className="btn btn--secondary" type="button" onClick={savePlansSnapshot}>
+                        Save plan
+                      </button>
+                    </div>
+                    <button
+                      className="btn btn--primary"
+                      type="button"
+                      onClick={() => {
+                        setEventForm({
+                          title: "",
+                          details: "",
+                          days: ["Monday"],
+                          start: "13:00",
+                          end: "14:00",
+                          color: EVENT_COLOR_PRESETS[0],
+                          useCustomColor: false,
+                        })
+                        setEventModal({ mode: "add" })
+                      }}
+                    >
+                      Add weekly event
+                    </button>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={() => openCalendarPopout("planning")}
+                    >
+                      Open pop-out calendar
+                    </button>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={downloadPlanningWeekIcs}
+                      title={`Mock week .ics for planning target: ${planningTermOption.label}`}
+                    >
+                      Download week (.ics)
+                    </button>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={downloadPlanningSemesterIcs}
+                      title={`Mock semester .ics; labeled for ${planningTermOption.label}`}
+                    >
+                      Download semester (.ics)
+                    </button>
+                  </div>
+                </header>
+                <p className="muted calendar-hint">
+                  Same personal weekly events as Enrollment (shared mock data). Striped blocks are plan-only for{" "}
+                  <strong>{planningTermOption.label}</strong>. Overlaps split into <strong>columns</strong> so enrolled,
+                  plan, and events stay visible. Exports name that planning target; dates are still mock.
+                </p>
                 <TimeGridCalendar
                   blocks={planningCalendarBlocks}
                   days={scheduleColumnDays}
@@ -1833,95 +2497,92 @@ function App() {
                     }
                   }}
                 />
-              </div>
+              </section>
 
-              <div className="pane-grid">
-                <article className="pane">
-                  <h3>Available courses</h3>
-                  <div
-                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
-                  >
-                    {sortedAvailableCourses.length === 0 && (
-                      <p className="muted" role="status">
-                        No courses match your filters. On Enrollment you can change search, department, and seats — or{" "}
-                        <button className="btn btn--link" type="button" onClick={clearFilters}>
-                          clear filters
-                        </button>
-                        .
-                      </p>
-                    )}
-                    {sortedAvailableCourses.map((course) => (
-                      <CourseCard
-                        key={`${course.id}-planner`}
-                        course={course}
-                        degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
-                        onOpen={setSelectedCourse}
-                        onAdd={addToPlan}
-                        addLabel="Add to plan"
-                        compact={settings.compactCatalog}
-                        actionVariant="secondary"
-                        draggable
+              <section className="planning-conflicts" aria-labelledby="planning-conflicts-heading">
+                <div className="planning-conflicts__head">
+                  <div>
+                    <h3 id="planning-conflicts-heading">Time conflicts on this grid</h3>
+                    <p className="muted planning-conflicts__lead">
+                      Same-time meetings among <strong>plan courses</strong>,{" "}
+                      <strong>{ENROLLMENT_TERM_LABEL}</strong> enrollment, and <strong>personal weekly events</strong>.
+                    </p>
+                  </div>
+                  {planningConflicts.length > 0 && (
+                    <div className="planning-conflicts__badges" aria-label="Conflict counts">
+                      {planningConflictCounts.course > 0 && (
+                        <span className="planning-conflict-badge planning-conflict-badge--course">
+                          {planningConflictCounts.course} class vs class
+                        </span>
+                      )}
+                      {planningConflictCounts.event > 0 && (
+                        <span className="planning-conflict-badge planning-conflict-badge--event">
+                          {planningConflictCounts.event} vs event
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {planningConflicts.length === 0 && (
+                  <div className="planning-conflicts__empty">
+                    <p className="planning-conflicts__empty-title">No time overlaps right now</p>
+                    <p className="muted planning-conflicts__empty-note">
+                      Your plan, enrolled classes, and events do not share the same meeting times on any day.
+                    </p>
+                  </div>
+                )}
+
+                {planningConflictsVisible.length > 0 && (
+                  <div className="planning-conflicts__grid">
+                    {planningConflictsVisible.map((conflict, index) => (
+                      <PlanningConflictCard
+                        key={
+                          conflict.type === "course"
+                            ? `c-${conflict.a}-${conflict.b}-${index}`
+                            : `e-${conflict.a}-${conflict.b}-${index}`
+                        }
+                        conflict={conflict}
+                        courses={courses}
                       />
                     ))}
                   </div>
-                </article>
+                )}
 
-                <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToPlan}>
-                  <h3>
-                    Plan courses
-                    {activePlan && (
-                      <span className="muted" style={{ fontSize: "0.88rem", fontWeight: 500 }}>
-                        {" "}
-                        — {plannedCredits} planned credits
-                      </span>
-                    )}
-                  </h3>
-                  <div
-                    className={`scroll-list${settings.compactCatalog ? " scroll-list--compact-grid" : ""}`}
-                  >
-                    {activePlan && plannedCourses.length === 0 && <p className="muted">Drag or add classes here.</p>}
-                    {plannedCourses.map((course) => (
-                      <CourseCard
-                        key={`${course.id}-planned`}
-                        course={course}
-                        degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
-                        onOpen={setSelectedCourse}
-                        onAdd={() => removeFromPlan(course.id)}
-                        addLabel="Remove"
-                        compact={settings.compactCatalog}
-                        actionVariant="danger"
-                      />
-                    ))}
+                {planningConflictsHiddenCount > 0 && (
+                  <div className="planning-conflicts__expand-wrap">
+                    <button
+                      className="btn btn--subtle planning-conflicts__expand"
+                      type="button"
+                      onClick={() => setPlanningConflictsExpanded(true)}
+                    >
+                      Show all {sortedPlanningConflicts.length} conflicts ({planningConflictsHiddenCount} more)
+                    </button>
                   </div>
-                </article>
-              </div>
+                )}
 
-              <section className="planning-conflicts">
-                <h3>Schedule conflicts in this plan</h3>
-                {planningConflicts.length === 0 && <p className="muted">No time overlaps in this plan right now.</p>}
-                <ul>
-                  {planningConflicts.map((conflict, index) => (
-                    <li key={`${conflict.a}-${conflict.b}-${index}`}>
-                      {conflict.type === "course"
-                        ? `Course ${conflict.a} overlaps with course ${conflict.b}`
-                        : `Course ${conflict.a} overlaps with event “${conflict.bTitle || conflict.b}”`}
-                    </li>
-                  ))}
-                </ul>
+                {planningConflictsExpanded && sortedPlanningConflicts.length > PLANNING_CONFLICTS_INITIAL && (
+                  <div className="planning-conflicts__expand-wrap">
+                    <button
+                      className="btn btn--subtle planning-conflicts__expand"
+                      type="button"
+                      onClick={() => setPlanningConflictsExpanded(false)}
+                    >
+                      Show fewer
+                    </button>
+                  </div>
+                )}
               </section>
 
               <footer className="planning-footer-bar">
-                {plansDirty && <span className="planning-unsaved">Unsaved plan changes</span>}
-                <button className="btn btn--subtle" type="button" onClick={savePlansSnapshot}>
-                  Save
-                </button>
                 <button
                   className="btn btn--primary"
                   type="button"
                   onClick={importPlanToEnrollment}
                   disabled={!activePlan || activePlan.courseIds.length === 0}
+                  title={`Adds plan courses to current-term enrollment (${ENROLLMENT_TERM_LABEL} mock), not to ${planningTermOption.label} registration.`}
                 >
-                  Import to enrollment
+                  Import to enrollment ({ENROLLMENT_TERM_LABEL})
                 </button>
               </footer>
             </>
@@ -2226,7 +2887,7 @@ function App() {
                   </label>
                   <p className="muted settings-hint">
                     When off, schedule-overlap toasts are hidden (enrollment add blocked; planning still allows overlap
-                    but won’t toast). The planning conflict list on the page still updates.
+                    but won’t toast). The planning conflict panel on the page still updates.
                   </p>
                   <label className="toggle-row">
                     <input
@@ -2476,6 +3137,19 @@ function App() {
               <button className="btn btn--subtle" type="button" onClick={() => setSelectedCourse(null)}>
                 Close
               </button>
+              {activeView === "planning" && activePlan?.courseIds.includes(selectedCourse.id) && (
+                <button
+                  className="btn btn--danger"
+                  type="button"
+                  onClick={() => {
+                    const id = selectedCourse.id
+                    setSelectedCourse(null)
+                    removeFromPlan(id)
+                  }}
+                >
+                  Remove from plan
+                </button>
+              )}
               {enrolledIds.includes(selectedCourse.id) ? (
                 <button
                   className="btn btn--danger"
@@ -2592,8 +3266,8 @@ function App() {
         >
           <p className="import-summary__lead">
             Plan <strong>“{importSummaryModal.planName}”</strong> — {importSummaryModal.addedCount} course
-            {importSummaryModal.addedCount === 1 ? "" : "s"} added to enrollment (when rules allowed). Skipped rows show
-            why.
+            {importSummaryModal.addedCount === 1 ? "" : "s"} added to <strong>current-term enrollment</strong> (
+            {ENROLLMENT_TERM_LABEL} mock) when rules allowed. Skipped rows show why.
           </p>
           <div className="import-summary__table-wrap">
             <table className="import-summary__table">
