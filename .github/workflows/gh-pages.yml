@@ -26,6 +26,7 @@ jobs:
           path: ~/EasyEnroll/.npm
           key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
 
+      - run: cd EasyEnroll
       - run: npm install
       - run: npm run build
 
