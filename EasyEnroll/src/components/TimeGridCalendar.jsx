@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { formatHourGutterLabel, PX_PER_HOUR } from "../utils/calendarLayout.js"
+import { formatHourGutterLabel, layoutOverlappingDayBlocks, PX_PER_HOUR } from "../utils/calendarLayout.js"
 import { textColorOnCourseBlock } from "../utils/courseColors.js"
 
 const MIN_IN_DAY = 24 * 60
@@ -69,33 +69,53 @@ export function TimeGridCalendar({
               })}
             </div>
             <div className="time-grid__days">
-              {days.map((day) => (
-                <div key={day} className="time-grid__day">
-                  <div
-                    className="time-grid__col time-grid__col--gridlines"
-                    style={{ height: totalH }}
-                  >
-                    {blocks
-                      .filter((b) => b.columnDay === day)
-                      .filter((b) => b.endMin > viewStart && b.startMin < viewEnd)
-                      .map((b) => {
+              {days.map((day) => {
+                const dayBlocks = blocks
+                  .filter((b) => b.columnDay === day)
+                  .filter((b) => b.endMin > viewStart && b.startMin < viewEnd)
+                const overlapLayout = layoutOverlappingDayBlocks(dayBlocks)
+                return (
+                  <div key={day} className="time-grid__day">
+                    <div
+                      className="time-grid__col time-grid__col--gridlines"
+                      style={{ height: totalH }}
+                    >
+                      {dayBlocks.map((b) => {
                         const top = ((b.startMin - viewStart) / 60) * PX_PER_HOUR
                         const h = ((b.endMin - b.startMin) / 60) * PX_PER_HOUR
                         const mainTitle = b.blockTitle ?? b.label
                         const timeLine = b.timeLine ?? ""
                         const code = b.blockCode
+                        const ol = overlapLayout.get(b.id)
+                        const totalLanes = ol?.totalLanes ?? 1
+                        const lane = ol?.lane ?? 0
+                        const laneFrac = totalLanes > 1 ? 100 / totalLanes : 0
+                        const horizontalStyle =
+                          totalLanes > 1
+                            ? {
+                                left: `calc(${(lane * laneFrac).toFixed(3)}% + 1px)`,
+                                width: `calc(${laneFrac.toFixed(3)}% - 3px)`,
+                                right: "auto",
+                              }
+                            : {}
                         return (
                           <button
                             key={b.id}
                             type="button"
-                            className={`time-grid__block ${b.stripe ? "time-grid__block--stripe" : ""}`}
+                            className={`time-grid__block ${b.stripe ? "time-grid__block--stripe" : ""} ${totalLanes > 1 ? "time-grid__block--overlap" : ""}`}
                             style={{
                               top,
                               height: Math.max(h, 20),
                               backgroundColor: b.color,
                               color: textColorOnCourseBlock(b.color),
+                              ...horizontalStyle,
                             }}
                             onClick={() => onBlockClick?.(b)}
+                            title={
+                              totalLanes > 1
+                                ? `${mainTitle} — overlaps ${totalLanes - 1} other block(s) this hour; column ${lane + 1} of ${totalLanes}`
+                                : undefined
+                            }
                             aria-label={
                               code
                                 ? `${mainTitle}, ${code}, ${timeLine}`
@@ -110,9 +130,10 @@ export function TimeGridCalendar({
                           </button>
                         )
                       })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>

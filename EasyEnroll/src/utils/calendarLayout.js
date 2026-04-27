@@ -117,6 +117,94 @@ export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] 
   return blocks
 }
 
+/** True if two blocks overlap in time on the same weekday column. */
+export function intervalsOverlap(a, b) {
+  if (a.columnDay !== b.columnDay) {
+    return false
+  }
+  return a.startMin < b.endMin && b.startMin < a.endMin
+}
+
+/**
+ * Group blocks into clusters where overlaps are transitive (A overlaps B, B overlaps C ⇒ one cluster).
+ * @param {Array<Record<string, unknown>>} blocks Same columnDay
+ * @returns {Array<Array<Record<string, unknown>>>}
+ */
+export function clusterBlocksByOverlap(blocks) {
+  const n = blocks.length
+  if (n === 0) {
+    return []
+  }
+  const parent = Array.from({ length: n }, (_, i) => i)
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  const union = (i, j) => {
+    const ri = find(i)
+    const rj = find(j)
+    if (ri !== rj) {
+      parent[ri] = rj
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (intervalsOverlap(blocks[i], blocks[j])) {
+        union(i, j)
+      }
+    }
+  }
+  const buckets = new Map()
+  for (let i = 0; i < n; i++) {
+    const r = find(i)
+    if (!buckets.has(r)) {
+      buckets.set(r, [])
+    }
+    buckets.get(r).push(blocks[i])
+  }
+  return [...buckets.values()]
+}
+
+/**
+ * Within one overlap cluster, assign non-overlapping lanes (columns) so all items remain visible.
+ * @returns {Map<string, { lane: number, totalLanes: number }>}
+ */
+export function assignLanesInCluster(clusterBlocks) {
+  const layout = new Map()
+  if (clusterBlocks.length === 0) {
+    return layout
+  }
+  const sorted = [...clusterBlocks].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin)
+  const laneEnd = []
+  for (const b of sorted) {
+    let L = 0
+    while (L < laneEnd.length && laneEnd[L] > b.startMin) {
+      L++
+    }
+    if (L === laneEnd.length) {
+      laneEnd.push(b.endMin)
+    } else {
+      laneEnd[L] = Math.max(laneEnd[L], b.endMin)
+    }
+    layout.set(b.id, { lane: L, totalLanes: 0 })
+  }
+  const totalLanes = laneEnd.length
+  for (const b of sorted) {
+    layout.get(b.id).totalLanes = totalLanes
+  }
+  return layout
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} dayBlocks Blocks for a single day column
+ * @returns {Map<string, { lane: number, totalLanes: number }>}
+ */
+export function layoutOverlappingDayBlocks(dayBlocks) {
+  const out = new Map()
+  for (const cluster of clusterBlocksByOverlap(dayBlocks)) {
+    const m = assignLanesInCluster(cluster)
+    m.forEach((v, k) => out.set(k, v))
+  }
+  return out
+}
+
 export function formatHourGutterLabel(h) {
   return h === 0 ? "12 am" : h < 12 ? `${h} am` : h === 12 ? "12 pm" : `${h - 12} pm`
 }
@@ -127,6 +215,7 @@ export function popoutHtmlForGrid(
   days,
   viewStartMin = 0,
   viewEndMin = MIN_IN_DAY,
+  caption = "Read-only pop-out. Same schedule as the main app.",
 ) {
   const pxPerHour = PX_PER_HOUR
   const totalH = ((viewEndMin - viewStartMin) / 60) * pxPerHour
@@ -182,7 +271,7 @@ export function popoutHtmlForGrid(
   )}</title></head>
   <body style="margin:0;font-family:Segoe UI,Arial,sans-serif;background:#f4faf4;color:#14361e;padding:12px;">
   <h1 style="font-size:18px;">${escapeHtml(userName)} — week view</h1>
-  <p style="font-size:12px;">Read-only pop-out. Same schedule as the main app.</p>
+  <p style="font-size:12px;">${escapeHtml(caption)}</p>
   <div style="display:flex;gap:6px;align-items:flex-start;max-width:100%;overflow-x:auto;">
   <div style="width:48px;flex-shrink:0;">${timeAxis}</div>
   <div style="display:flex;flex:1;min-width:520px;gap:0;">${cols}</div>
