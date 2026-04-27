@@ -26,9 +26,11 @@ jobs:
           path: ~/EasyEnroll/.npm
           key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
 
-      - run: cd EasyEnroll
       - run: npm install
+        working-directory: ./EasyEnroll
+
       - run: npm run build
+        working-directory: ./EasyEnroll
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
