@@ -17,7 +17,7 @@ export const PLANNING_TERM_OPTIONS = [
   },
   {
     id: "spring-2026",
-    label: "Spring 2026 (same as enrollment mock)",
+    label: "Spring 2026",
     shortLabel: "Spring ’26",
   },
 ]

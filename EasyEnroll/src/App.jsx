@@ -409,7 +409,7 @@ function LoginPage({
         </button>
         <div className="divider">or</div>
         <label>
-          Pretend SSO Identity
+          SSO Identity
           <select value={ssoUserId} onChange={(event) => setSsoUserId(event.target.value)}>
             {mockUsers.map((user) => (
               <option key={user.id} value={user.id}>
@@ -878,8 +878,8 @@ function App() {
     const termOpt = getPlanningTermOption(planningContext.targetTermId)
     const caption =
       src === "planning"
-        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL} mock) + personal weekly events; striped: courses only in the active plan.`
-        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL} mock) — matches the main Enrollment calendar.`
+        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL}) + personal weekly events; striped: courses only in the active plan.`
+        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL}) — matches the main Enrollment calendar.`
     const html = popoutHtmlForGrid(
       currentUser.name,
       blocks,
@@ -940,7 +940,7 @@ function App() {
     if (!currentUser) {
       return
     }
-    const ics = buildWeekScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (this week, mock)`)
+    const ics = buildWeekScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (this week)`)
     if (!ics) {
       pushToast("error", "Nothing on your calendar to export yet.")
       return
@@ -953,13 +953,13 @@ function App() {
     if (!currentUser) {
       return
     }
-    const ics = buildSemesterScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (mock Spring ’26 dates)`)
+    const ics = buildSemesterScheduleIcs(dashboardBlocks, `Easy Enroll — ${currentUser.name} (Spring ’26 dates)`)
     if (!ics) {
       pushToast("error", "Nothing on your calendar to export yet.")
       return
     }
     downloadIcsFile(ics, "easyenroll-semester.ics")
-    pushToast("success", "Downloaded a semester-anchored .ics (mock start Jan 12, 2026; not from registrar).")
+    pushToast("success", "Downloaded a semester-anchored .ics (start Jan 12, 2026).")
   }
 
   const downloadPlanningWeekIcs = () => {
@@ -969,7 +969,7 @@ function App() {
     const label = planningTermOption.label
     const ics = buildWeekScheduleIcs(
       planningCalendarBlocks,
-      `Easy Enroll — ${currentUser.name} (planning draft: ${label}; mock week export)`,
+      `Easy Enroll — ${currentUser.name} (planning draft: ${label}; week export)`,
     )
     if (!ics) {
       pushToast("error", "Nothing on this planning grid to export yet.")
@@ -978,7 +978,7 @@ function App() {
     downloadIcsFile(ics, `easyenroll-planning-${planningTermOption.id}-week.ics`)
     pushToast(
       "success",
-      `Downloaded week .ics for planning target “${label}” (mock recurring week; not registrar data).`,
+      `Downloaded week .ics for planning target “${label}” (recurring week; not registrar data).`,
     )
   }
 
@@ -989,7 +989,7 @@ function App() {
     const label = planningTermOption.label
     const ics = buildSemesterScheduleIcs(
       planningCalendarBlocks,
-      `Easy Enroll — ${currentUser.name} (planning draft ${label}; mock semester anchor)`,
+      `Easy Enroll — ${currentUser.name} (planning draft ${label}; semester anchor)`,
     )
     if (!ics) {
       pushToast("error", "Nothing on this planning grid to export yet.")
@@ -998,7 +998,7 @@ function App() {
     downloadIcsFile(ics, `easyenroll-planning-${planningTermOption.id}-semester.ics`)
     pushToast(
       "success",
-      `Downloaded semester .ics for planning target “${label}” (mock Jan 12, 2026 anchor; not registrar).`,
+      `Downloaded semester .ics for planning target “${label}” (Jan 12, 2026 anchor; not registrar).`,
     )
   }
 
@@ -1008,8 +1008,8 @@ function App() {
       pushToast("error", "Could not build a file for that course.")
       return
     }
-    downloadIcsFile(ics, `${course.id.replace(/[^a-zA-Z0-9-_]/g, "_")}-mock.ics`)
-    pushToast("success", "Downloaded a mock semester file for this course only.")
+    downloadIcsFile(ics, `${course.id.replace(/[^a-zA-Z0-9-_]/g, "_")}.ics`)
+    pushToast("success", "Downloaded a semester file for this course only.")
   }
 
   const addCourseToEnrollment = (course, options = { ignoreEventConflicts: false }) => {
@@ -1281,8 +1281,8 @@ function App() {
       pushToast(
         "success",
         tableRows.filter((r) => r.result === "skipped").length === 0
-          ? `Imported ${addedCount} course(s) into current-term enrollment (${ENROLLMENT_TERM_LABEL} mock).`
-          : `Imported ${addedCount} course(s) into enrollment (${ENROLLMENT_TERM_LABEL} mock). Open the table for skip reasons.`,
+          ? `Imported ${addedCount} course(s) into current-term enrollment (${ENROLLMENT_TERM_LABEL}).`
+          : `Imported ${addedCount} course(s) into enrollment (${ENROLLMENT_TERM_LABEL}). Open the table for skip reasons.`,
         {
           label: "View week calendar",
           onAction: () => setActiveView("dashboard"),
@@ -1311,7 +1311,7 @@ function App() {
     a.click()
     URL.revokeObjectURL(url)
     bumpSession("planExportDownloads")
-    pushToast("success", "Downloaded a JSON backup of your plans (mock local storage only).")
+    pushToast("success", "Downloaded a JSON backup of your plans.")
   }
 
   const onPlansFileSelected = (event) => {
@@ -1500,8 +1500,8 @@ function App() {
     const termOpt = getPlanningTermOption(planningContext.targetTermId)
     const caption =
       source === "planning"
-        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL} mock) + personal weekly events; striped: courses only in the active plan.`
-        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL} mock) — matches the main Enrollment calendar.`
+        ? `Read-only. Planning draft for ${termOpt.label}. Solid blocks: enrolled (${ENROLLMENT_TERM_LABEL}) + personal weekly events; striped: courses only in the active plan.`
+        : `Read-only. Enrollment week (${ENROLLMENT_TERM_LABEL}) — matches the main Enrollment calendar.`
     const html = popoutHtmlForGrid(
       currentUser.name,
       blocks,
@@ -1581,7 +1581,7 @@ function App() {
         <div className="onboarding-notice" role="region" aria-label="Getting started with enrollment">
           <div className="onboarding-notice__body">
             <p className="onboarding-notice__title">
-              <strong>Quick tips</strong> <span className="muted">(one-time coach marks — mock prototype)</span>
+              <strong>Quick tips</strong> <span className="muted">(one-time coach marks)</span>
             </p>
             <ul className="onboarding-notice__list">
               <li>
@@ -1589,7 +1589,7 @@ function App() {
                 <strong>Add</strong> on a card.
               </li>
               <li>
-                <strong>Click</strong> a course card to open details, syllabus (mock link), and calendar export.
+                <strong>Click</strong> a course card to open details, syllabus, and calendar export.
               </li>
               <li>
                 Use <strong>Recommended</strong> above for year-aware suggestions; chips and search refine the catalog.
@@ -1816,7 +1816,7 @@ function App() {
                   className="btn btn--secondary"
                   type="button"
                   onClick={downloadSemesterIcs}
-                  title="Mock Spring 2026 anchor (Jan 12); not from registrar"
+                  title="Spring 2026 anchor (Jan 12)"
                 >
                   Download semester (.ics)
                 </button>
@@ -1824,8 +1824,7 @@ function App() {
             </header>
             <p className="muted calendar-hint">
               Enrolled courses use solid colors. Click a block for course details or to edit a personal event. When two
-              blocks overlap in time, they split into <strong>side-by-side columns</strong> so you can see both. Week and
-              semester .ics files use <strong>mock</strong> dates (see toast after download).
+              blocks overlap in time, they split into <strong>side-by-side columns</strong> so you can see both..
             </p>
             <TimeGridCalendar
               blocks={dashboardBlocks}
@@ -1866,7 +1865,7 @@ function App() {
                   onChange={(ev) =>
                     setPlanningContext((prev) => ({ ...prev, targetTermId: ev.target.value }))
                   }
-                  aria-label="Mock target term for this planning session"
+                  aria-label="Target term for this planning session"
                 >
                   {PLANNING_TERM_OPTIONS.map((o) => (
                     <option key={o.id} value={o.id}>
@@ -1892,11 +1891,10 @@ function App() {
               <div className="onboarding-notice__body">
                 <p className="onboarding-notice__title">
                   <strong>Planning vs Enrollment</strong>{" "}
-                  <span className="muted">(one-time — mock prototype)</span>
                 </p>
                 <ul className="onboarding-notice__list">
                   <li>
-                    <strong>Enrollment</strong> is your mock registered schedule for this term. <strong>Planning</strong>{" "}
+                    <strong>Enrollment</strong> is your registered schedule for this term. <strong>Planning</strong>{" "}
                     is for what-if sets before you commit.
                   </li>
                   <li>
@@ -1904,7 +1902,7 @@ function App() {
                     are only in the active plan.
                   </li>
                   <li>
-                    Pick a <strong>planning target term</strong> in the banner (mock label). Import adds to{" "}
+                    Pick a <strong>planning target term</strong> in the banner. Import adds to{" "}
                     <strong>{ENROLLMENT_TERM_LABEL}</strong> enrollment, not that future term’s registration.
                   </li>
                   <li>
@@ -2033,7 +2031,7 @@ function App() {
                   <h2>Planning studio</h2>
                   <p className="muted">
                     Drafting for <strong>{planningTermOption.label}</strong> — not registration until you{" "}
-                    <strong>Import to enrollment</strong> on <strong>{ENROLLMENT_TERM_LABEL}</strong> (mock). Solid
+                    <strong>Import to enrollment</strong> on <strong>{ENROLLMENT_TERM_LABEL}</strong>. Solid
                     blocks: this term’s enrolled courses and your weekly personal events. Striped: courses only in the
                     active plan. Each plan is capped at <strong>{MAX_CREDITS} credits</strong> (advisor approval to
                     overload). Time overlaps are allowed; we toast and list them below.
@@ -2084,14 +2082,14 @@ function App() {
                     on this grid (plan + enrolled + events)
                   </span>
                   <span className="planning-summary-strip__context muted">
-                    Enrolled courses shown are <strong>{ENROLLMENT_TERM_LABEL}</strong> (mock), not the plan’s target term.
+                    Enrolled courses shown are <strong>{ENROLLMENT_TERM_LABEL}</strong>, not the plan’s target term.
                   </span>
                 </div>
               )}
 
               {activePlan && plannedCredits > MAX_CREDITS && (
                 <p className="planning-advisor-banner" role="alert">
-                  This plan is over the <strong>{MAX_CREDITS} credit</strong> mock limit (likely from an older save).
+                  This plan is over the <strong>{MAX_CREDITS} credit</strong> limit (likely from an older save).
                   Remove courses until you are at or under {MAX_CREDITS}, or work with your advisor if you need an
                   overload.
                 </p>
@@ -2132,7 +2130,7 @@ function App() {
                       aria-labelledby="plan-compare-toggle"
                     >
                       <h3>Compare two plans</h3>
-                      <p className="muted">Pick which saved plans to diff. Course IDs are from the mock catalog.</p>
+                      <p className="muted">Pick which saved plans to diff. Course IDs are from the catalog.</p>
                       <div className="plan-compare__pickers">
                         <label>
                           Plan A
@@ -2442,7 +2440,7 @@ function App() {
                       className="btn btn--secondary"
                       type="button"
                       onClick={downloadPlanningWeekIcs}
-                      title={`Mock week .ics for planning target: ${planningTermOption.label}`}
+                      title={`Week .ics for planning target: ${planningTermOption.label}`}
                     >
                       Download week (.ics)
                     </button>
@@ -2450,16 +2448,16 @@ function App() {
                       className="btn btn--secondary"
                       type="button"
                       onClick={downloadPlanningSemesterIcs}
-                      title={`Mock semester .ics; labeled for ${planningTermOption.label}`}
+                      title={`Semester .ics; labeled for ${planningTermOption.label}`}
                     >
                       Download semester (.ics)
                     </button>
                   </div>
                 </header>
                 <p className="muted calendar-hint">
-                  Same personal weekly events as Enrollment (shared mock data). Striped blocks are plan-only for{" "}
+                  Same personal weekly events as Enrollment (shared data). Striped blocks are plan-only for{" "}
                   <strong>{planningTermOption.label}</strong>. Overlaps split into <strong>columns</strong> so enrolled,
-                  plan, and events stay visible. Exports name that planning target; dates are still mock.
+                  plan, and events stay visible. Exports name that planning target.
                 </p>
                 <TimeGridCalendar
                   blocks={planningCalendarBlocks}
@@ -2568,7 +2566,7 @@ function App() {
                   type="button"
                   onClick={importPlanToEnrollment}
                   disabled={!activePlan || activePlan.courseIds.length === 0}
-                  title={`Adds plan courses to current-term enrollment (${ENROLLMENT_TERM_LABEL} mock), not to ${planningTermOption.label} registration.`}
+                  title={`Adds plan courses to current-term enrollment (${ENROLLMENT_TERM_LABEL}), not to ${planningTermOption.label} registration.`}
                 >
                   Import to enrollment ({ENROLLMENT_TERM_LABEL})
                 </button>
@@ -2664,14 +2662,12 @@ function App() {
       {activeView === "profile" && (
         <section className="profile-section">
           <h2>Profile</h2>
-          <p>Identity fields follow university policy. This is a front-end mock only.</p>
-
+          <p>Identity fields follow university policy.</p>
           <div className="profile-wide-card">
             <div className="profile-group" aria-labelledby="profile-group-photo-heading">
               <h3 className="profile-group__title" id="profile-group-photo-heading">
                 Photo
               </h3>
-              <p className="muted profile-group__lead">You can change your picture anytime; it stays in this browser only.</p>
               <div className="profile-avatar-block">
                 {profile.avatarDataUrl ? (
                   <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
@@ -2709,11 +2705,10 @@ function App() {
 
             <div className="profile-group profile-group--locked" aria-labelledby="profile-group-identity-heading">
               <h3 className="profile-group__title" id="profile-group-identity-heading">
-                Identity (read-only in this mock)
+                Identity (read-only)
               </h3>
               <p className="muted profile-group__lead">
-                Public / legal identity can’t be changed here — requests go through the university. No real submission;
-                the modal is a stand-in flow.
+                Public / legal identity can’t be changed here — requests go through the university.
               </p>
               <div className="profile-locked">
                 <p>
@@ -2736,13 +2731,13 @@ function App() {
 
             <div className="profile-group" aria-labelledby="profile-group-contact-heading">
               <h3 className="profile-group__title" id="profile-group-contact-heading">
-                School email (editable local part)
+                School email
               </h3>
               <p className="muted profile-group__lead">
                 How a classmate or instructor might see your campus address. “Public preview” = this email line only — no
                 live directory.
               </p>
-              <div className="profile-public-preview" aria-label="Mock public email preview">
+              <div className="profile-public-preview" aria-label="Public email preview">
                 <span className="muted">Preview:</span>{" "}
                 <strong>
                   {(profile.emailLocal || "username").trim() || "username"}
@@ -3084,7 +3079,7 @@ function App() {
                   }
                   pushToast(
                     "success",
-                    "Request recorded (mock). The registrar / IT would email you in a real deployment.",
+                    "Request recorded. The registrar / IT will email you back.",
                   )
                   setUniRequest(null)
                   setUniRequestNote("")
@@ -3121,9 +3116,9 @@ function App() {
                 className="btn btn--secondary"
                 type="button"
                 onClick={() => downloadCourseIcs(selectedCourse)}
-                title="Mock semester start Jan 12, 2026"
+                title="Semester start Jan 12, 2026"
               >
-                Download .ics (mock)
+                Download .ics
               </button>
               <button className="btn btn--subtle" type="button" onClick={() => setSelectedCourse(null)}>
                 Close
@@ -3194,11 +3189,11 @@ function App() {
                   className="mock-syllabus-link"
                   onClick={(e) => e.preventDefault()}
                 >
-                  Open syllabus (mock link)
+                  Open syllabus
                 </a>
               </p>
               <p className="muted course-detail__fine">
-                Placeholder only — the URL is not a real page. Use the mock .ics download for calendar experiments.
+                Placeholder only — the URL is not a real page. Use the .ics download for calendar experiments.
               </p>
             </div>
             <div className="course-detail__section">
@@ -3258,7 +3253,7 @@ function App() {
           <p className="import-summary__lead">
             Plan <strong>“{importSummaryModal.planName}”</strong> — {importSummaryModal.addedCount} course
             {importSummaryModal.addedCount === 1 ? "" : "s"} added to <strong>current-term enrollment</strong> (
-            {ENROLLMENT_TERM_LABEL} mock) when rules allowed. Skipped rows show why.
+            {ENROLLMENT_TERM_LABEL}) when rules allowed. Skipped rows show why.
           </p>
           <div className="import-summary__table-wrap">
             <table className="import-summary__table">
