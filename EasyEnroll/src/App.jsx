@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
 import { TimeGridCalendar } from "./components/TimeGridCalendar.jsx"
 import { useToast } from "./components/ToastStack.jsx"
-import { loginWithPassword, loginWithSso } from "./utils/auth"
+import { loginWithSso } from "./utils/auth"
 import { buildTimeGridBlocks, getViewWindowFromBlocks, popoutHtmlForGrid } from "./utils/calendarLayout.js"
 import { courses } from "./data/courses"
 import {
@@ -85,7 +85,7 @@ function persistPlanningOnboardingDismissed() {
   }
 }
 
-const EVENT_COLOR_PRESETS = ["#1f8f4c", "#2f6fcb", "#7a3d8c", "#b85c0a", "#0d4a4a", "#6b1d3d"]
+const EVENT_COLOR_PRESETS = ["#b8e1ff", "#ffd6e8", "#d8f3dc", "#ffe8b6", "#e2d4ff", "#cfeff7"]
 
 const defaultSettings = {
   compactCalendar: false,
@@ -115,7 +115,7 @@ const defaultEvents = [
     days: ["Monday", "Wednesday"],
     start: "14:30",
     end: "16:30",
-    color: "#3d6b8f",
+    color: EVENT_COLOR_PRESETS[0],
     description: "Evening shift on campus.",
   },
 ]
@@ -124,7 +124,7 @@ const defaultEvents = [
 function normalizeEventEntry(event) {
   return {
     ...event,
-    color: event.color || "#2f6fcb",
+    color: event.color || EVENT_COLOR_PRESETS[0],
     description: event.description ?? "",
   }
 }
@@ -369,13 +369,8 @@ function Modal({ title, children, onClose, actions }) {
 }
 
 function LoginPage({
-  localEmail,
-  setLocalEmail,
-  localPassword,
-  setLocalPassword,
   ssoUserId,
   setSsoUserId,
-  onPasswordLogin,
   onSsoLogin,
   error,
 }) {
@@ -383,42 +378,18 @@ function LoginPage({
     <main className="login-page">
       <section className="login-card">
         <h1>Easy Enroll</h1>
-        <p>Sign in to access your enrollment dashboard and saved plans.</p>
-        <div className="form-grid">
-          <label>
-            University Email
-            <input
-              value={localEmail}
-              onChange={(event) => setLocalEmail(event.target.value)}
-              type="email"
-              placeholder="student@easyenroll.edu"
-            />
-          </label>
-          <label>
-            Password
-            <input
-              value={localPassword}
-              onChange={(event) => setLocalPassword(event.target.value)}
-              type="password"
-              placeholder="demo123"
-            />
-          </label>
-        </div>
-        <button className="btn btn--primary" type="button" onClick={onPasswordLogin}>
-          Log In
-        </button>
-        <div className="divider">or</div>
+        <p>Choose your SSO identity to access your enrollment dashboard and saved plans.</p>
         <label>
           SSO Identity
           <select value={ssoUserId} onChange={(event) => setSsoUserId(event.target.value)}>
             {mockUsers.map((user) => (
               <option key={user.id} value={user.id}>
-                {user.name} ({user.email})
+                {user.name}
               </option>
             ))}
           </select>
         </label>
-        <button className="btn btn--secondary" type="button" onClick={onSsoLogin}>
+        <button className="btn btn--primary" type="button" onClick={onSsoLogin}>
           Sign In With University SSO
         </button>
         {error && <p className="error-text">{error}</p>}
@@ -435,8 +406,6 @@ function App() {
   const [session, setSession] = useState(() => initialSession)
   const [activeView, setActiveView] = useState("dashboard")
 
-  const [localEmail, setLocalEmail] = useState("jlee@easyenroll.edu")
-  const [localPassword, setLocalPassword] = useState("demo123")
   const [ssoUserId, setSsoUserId] = useState(mockUsers[0].id)
   const [loginError, setLoginError] = useState("")
 
@@ -570,7 +539,6 @@ function App() {
   const goToView = useCallback(
     (view) => {
       if (activeView === "planning" && view !== "planning" && plansDirty) {
-        // eslint-disable-next-line no-alert
         if (!window.confirm("You have unsaved plan changes. Leave the Planning page?")) {
           return
         }
@@ -1438,19 +1406,6 @@ function App() {
     })
   }
 
-  const handlePasswordLogin = () => {
-    const user = loginWithPassword(localEmail, localPassword)
-    if (!user) {
-      setLoginError("Invalid email or password. Use demo123 for listed accounts.")
-      return
-    }
-    const nextSession = { userId: user.id, method: "password" }
-    hydrateUserState(user)
-    saveAuthSession(nextSession)
-    setSession(nextSession)
-    setLoginError("")
-  }
-
   const handleSsoLogin = () => {
     const user = loginWithSso(ssoUserId)
     if (!user) {
@@ -1519,13 +1474,8 @@ function App() {
   if (!session || !currentUser) {
     return (
       <LoginPage
-        localEmail={localEmail}
-        setLocalEmail={setLocalEmail}
-        localPassword={localPassword}
-        setLocalPassword={setLocalPassword}
         ssoUserId={ssoUserId}
         setSsoUserId={setSsoUserId}
-        onPasswordLogin={handlePasswordLogin}
         onSsoLogin={handleSsoLogin}
         error={loginError}
       />
@@ -1843,7 +1793,7 @@ function App() {
                     days: [...ev.days],
                     start: ev.start,
                     end: ev.end,
-                    color: ev.color || "#2f6fcb",
+                    color: ev.color || EVENT_COLOR_PRESETS[0],
                     useCustomColor: true,
                   })
                   setEventModal({ mode: "edit", id: ev.id })
@@ -1945,7 +1895,6 @@ function App() {
                   className="btn btn--primary"
                   type="button"
                   onClick={() => {
-                    // eslint-disable-next-line no-alert
                     const n = window.prompt("Plan name?", "My plan")
                     if (n !== null) {
                       createPlan(n)
@@ -2048,7 +1997,6 @@ function App() {
                     className="btn btn--subtle"
                     type="button"
                     onClick={() => {
-                      // eslint-disable-next-line no-alert
                       const n = window.prompt("New plan name?", `Plan ${plans.length + 1}`)
                       if (n !== null) {
                         createPlan(n)
@@ -2476,7 +2424,7 @@ function App() {
                         days: [...ev.days],
                         start: ev.start,
                         end: ev.end,
-                        color: ev.color || "#2f6fcb",
+                        color: ev.color || EVENT_COLOR_PRESETS[0],
                         useCustomColor: true,
                       })
                       setEventModal({ mode: "edit", id: ev.id })
@@ -2622,7 +2570,6 @@ function App() {
                             className="btn btn--subtle"
                             type="button"
                             onClick={() => {
-                              // eslint-disable-next-line no-alert
                               const n = window.prompt("Rename plan", plan.name)
                               if (n && n.trim()) {
                                 setPlans((prev) => prev.map((p) => (p.id === plan.id ? { ...p, name: n.trim() } : p)))
@@ -2859,7 +2806,7 @@ function App() {
                 </ul>
               )}
               <details className="settings-advanced">
-                <summary>Alerts, motion, and contrast (show more)</summary>
+                <summary>Alerts and accessibility (show more)</summary>
                 <div className="settings-advanced__body">
                   <label className="toggle-row">
                     <input
@@ -2927,9 +2874,6 @@ function App() {
               </div>
             </div>
           </div>
-          <p className="muted settings-doc-link">
-            UI principles in <code>hci-ui-suggestions.md</code> · roadmap in <code>tasks.md</code>.
-          </p>
         </section>
       )}
 
@@ -3034,7 +2978,7 @@ function App() {
                 Custom
                 <input
                   type="color"
-                  value={eventForm.color?.slice(0, 7) || "#2f6fcb"}
+                  value={eventForm.color?.slice(0, 7) || EVENT_COLOR_PRESETS[0]}
                   onChange={(ev) => setEventForm((p) => ({ ...p, color: ev.target.value, useCustomColor: true }))}
                   aria-label="Pick custom event color"
                 />
@@ -3042,7 +2986,7 @@ function App() {
               <p className="color-selected-summary">
                 <span className="muted">Selected color: </span>
                 <span className="color-hex-value" aria-live="polite">
-                  {(eventForm.color || "#2f6fcb").toUpperCase()}
+                  {(eventForm.color || EVENT_COLOR_PRESETS[0]).toUpperCase()}
                 </span>
               </p>
             </div>

@@ -1,17 +1,17 @@
-/** Consistent, readable text on all blocks (light backgrounds). */
+/** Pastel palette for calmer schedule blocks and theme consistency. */
 const PALETTE = [
-  "#0d4f2a",
-  "#0f3d6b",
-  "#5c2d7a",
-  "#7a3d0d",
-  "#1d6b5c",
-  "#6b1d3d",
-  "#3d4f0d",
-  "#0d3d5c",
-  "#4a0d5c",
-  "#5c4a0d",
-  "#0d4a4a",
-  "#4a0d0d",
+  "#f8c8dc",
+  "#cde7ff",
+  "#d8f3dc",
+  "#ffe5b4",
+  "#e6d5ff",
+  "#ffd6cc",
+  "#fff1b8",
+  "#c9f2ff",
+  "#f9d5e5",
+  "#d9f7be",
+  "#ffe0f0",
+  "#d6e4ff",
 ]
 
 function hashId(str) {
@@ -30,13 +30,13 @@ export function colorForCourseId(courseId) {
   return PALETTE[hashId(String(courseId)) % PALETTE.length]
 }
 
-export function textColorOnCourseBlock(hex) {
-  return "#ffffff"
+export function textColorOnCourseBlock() {
+  return "#1f2937"
 }
 
 export function withAlpha(hex, a) {
   if (!hex || hex[0] !== "#" || (hex.length !== 7 && hex.length !== 4)) {
-    return `rgba(13, 79, 42, ${a})`
+    return `rgba(248, 200, 220, ${a})`
   }
   const n = hex.slice(1)
   const v =

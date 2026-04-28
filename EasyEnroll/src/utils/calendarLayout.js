@@ -107,7 +107,7 @@ export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] 
         blockTitle: event.title,
         timeLine: formatTimeRange12h(event.start, event.end),
         blockCode: "",
-        color: event.color || "#2f6fcb",
+        color: event.color || "#b8e1ff",
         stripe: false,
         data: { type: "event", event, day },
       })
