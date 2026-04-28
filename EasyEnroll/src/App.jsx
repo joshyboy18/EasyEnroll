@@ -1537,55 +1537,43 @@ function App() {
       <a className="skip-link" href="#page-main">
         Skip to main content
       </a>
+      <header className="app-topbar">
+      <h1>Easy Enroll</h1>
+      <nav className="nav-row">
+        <button
+          className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
+          type="button"
+          onClick={() => goToView("dashboard")}
+        >
+          Enrollment
+        </button>
+        <button
+          className={`btn ${activeView === "planning" ? "btn--primary" : "btn--subtle"}`}
+          type="button"
+          onClick={() => goToView("planning")}
+        >
+          Planning
+        </button>
+        <button
+          className={`btn ${activeView === "profile" ? "btn--primary" : "btn--subtle"}`}
+          type="button"
+          onClick={() => goToView("profile")}
+        >
+          Profile
+        </button>
+        <button
+          className={`btn ${activeView === "settings" ? "btn--primary" : "btn--subtle"}`}
+          type="button"
+          onClick={() => goToView("settings")}
+        >
+          Settings
+        </button>
+        <button className="btn btn--danger" type="button" onClick={handleLogout}>
+          Logout
+        </button>
+      </nav>
+    </header>
       <main className="app-shell" id="page-main" tabIndex={-1}>
-        <header className="app-topbar">
-        <div>
-          <h1>Easy Enroll</h1>
-          <p className="app-wayfinding muted">
-            {activeView === "planning"
-              ? `Planning — target ${planningTermOption.shortLabel} (mock). Not registered until you import on Enrollment (${ENROLLMENT_TERM_LABEL} mock). Solid = this term + events; striped = plan-only.`
-              : VIEW_WAYFINDING[activeView]}
-          </p>
-          <p>
-            {profile.name || currentUser.name} | {profile.emailLocal || "student"}
-            {SCHOOL_EMAIL_DOMAIN}
-          </p>
-          <p className="muted">Programs: {getProgramNames(currentUser.programs).join("; ")}</p>
-        </div>
-        <nav className="nav-row">
-          <button
-            className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
-            type="button"
-            onClick={() => goToView("dashboard")}
-          >
-            Enrollment
-          </button>
-          <button
-            className={`btn ${activeView === "planning" ? "btn--primary" : "btn--subtle"}`}
-            type="button"
-            onClick={() => goToView("planning")}
-          >
-            Planning
-          </button>
-          <button
-            className={`btn ${activeView === "profile" ? "btn--primary" : "btn--subtle"}`}
-            type="button"
-            onClick={() => goToView("profile")}
-          >
-            Profile
-          </button>
-          <button
-            className={`btn ${activeView === "settings" ? "btn--primary" : "btn--subtle"}`}
-            type="button"
-            onClick={() => goToView("settings")}
-          >
-            Settings
-          </button>
-          <button className="btn btn--danger" type="button" onClick={handleLogout}>
-            Logout
-          </button>
-        </nav>
-      </header>
 
       <ToastContainer />
 
@@ -2731,6 +2719,9 @@ function App() {
                 <p>
                   <strong>Display name (read-only):</strong> {profile.name || currentUser.name}
                 </p>
+                  <p>
+                    <strong>Programs: </strong> {getProgramNames(currentUser.programs).join("; ")}
+                  </p>
                 <p className="muted">Legal name and password are managed by the university directory.</p>
                 <div className="profile-request-row">
                   <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
