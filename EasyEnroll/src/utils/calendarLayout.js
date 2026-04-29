@@ -1,4 +1,4 @@
-import { colorForCourseId } from "./courseColors.js"
+import { colorForCourseId, textColorOnCourseBlock } from "./courseColors.js"
 import { toMinutes } from "./conflicts.js"
 import { formatTimeRange12h } from "./timeFormat.js"
 
@@ -216,7 +216,12 @@ export function popoutHtmlForGrid(
   viewStartMin = 0,
   viewEndMin = MIN_IN_DAY,
   caption = "Read-only pop-out. Same schedule as the main app.",
+  options = {},
 ) {
+  const {
+    logoIconSrc = "",
+    logoTextSrc = "",
+  } = options
   const pxPerHour = PX_PER_HOUR
   const totalH = ((viewEndMin - viewStartMin) / 60) * pxPerHour
   const colStyle = (b) => {
@@ -226,7 +231,7 @@ export function popoutHtmlForGrid(
     const bg = b.stripe
       ? `repeating-linear-gradient(45deg, ${base}99, ${base}99 4px, ${base}55 4px, ${base}55 8px), ${base}`
       : base
-    return `top:${top}px;height:${Math.max(h, 20)}px;background:${bg};color:#fff;border-radius:6px;padding:3px 4px;font-size:11px;line-height:1.25;overflow:hidden;position:absolute;left:1px;right:1px;box-sizing:border-box;`
+    return `top:${top}px;height:${Math.max(h, 20)}px;background:${bg};color:${textColorOnCourseBlock(base)};border-radius:6px;padding:3px 4px;font-size:11px;line-height:1.25;overflow:hidden;position:absolute;left:1px;right:1px;box-sizing:border-box;`
   }
 
   const cols = days
@@ -249,7 +254,7 @@ export function popoutHtmlForGrid(
         )
         .join("")
       return `<div style="flex:1;min-width:100px;border-left:1px solid #c8d8c8;">
-        <h3 style="margin:0 0 4px 4px;font-size:12px;">${escapeHtml(day)}</h3>
+        <h3 style="margin:0 0 4px 4px;font-size:12px;color:#123321;">${escapeHtml(day)}</h3>
         <div style="position:relative;overflow:hidden;height:${totalH}px;background-image:repeating-linear-gradient(to bottom, #e0ebe2 0, #e0ebe2 1px, transparent 1px, transparent ${pxPerHour}px);background-size:100% ${pxPerHour}px;">${inner}</div>
       </div>`
     })
@@ -259,7 +264,7 @@ export function popoutHtmlForGrid(
   for (let t = viewStartMin; t < viewEndMin; t += 60) {
     const h = t / 60
     timeAxisParts.push(
-      `<div style="height:${pxPerHour}px;border-bottom:1px solid #e8f0e8;font-size:11px;color:#4a5c4a;padding-right:4px;text-align:right;">${formatHourGutterLabel(
+      `<div style="height:${pxPerHour}px;border-bottom:1px solid #e8f0e8;font-size:11px;color:#3a5345;padding-right:4px;text-align:right;">${formatHourGutterLabel(
         h,
       )}</div>`,
     )
@@ -269,12 +274,20 @@ export function popoutHtmlForGrid(
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Easy Enroll — ${escapeHtml(
     userName,
   )}</title></head>
-  <body style="margin:0;font-family:Segoe UI,Arial,sans-serif;background:#f4faf4;color:#14361e;padding:12px;">
-  <h1 style="font-size:18px;">${escapeHtml(userName)} — week view</h1>
-  <p style="font-size:12px;">${escapeHtml(caption)}</p>
-  <div style="display:flex;gap:6px;align-items:flex-start;max-width:100%;overflow-x:auto;">
-  <div style="width:48px;flex-shrink:0;">${timeAxis}</div>
-  <div style="display:flex;flex:1;min-width:520px;gap:0;">${cols}</div>
+  <body style="margin:0;font-family:'Trebuchet MS','Segoe UI',sans-serif;background:radial-gradient(circle at top right, #dff2df, #f2faf3 40%, #ecf7ee 75%);color:#123321;padding:16px;min-height:100vh;">
+  <div style="max-width:1280px;margin:0 auto;display:grid;gap:12px;">
+    <div style="display:flex;justify-content:center;align-items:center;gap:0;min-width:0;">
+      ${logoIconSrc ? `<img src="${escapeHtml(logoIconSrc)}" alt="Easy Enroll" style="width:2.15rem;height:2.15rem;object-fit:contain;flex:0 0 auto;" />` : ""}
+      ${logoTextSrc ? `<img src="${escapeHtml(logoTextSrc)}" alt="Easy Enroll" style="width:clamp(9.5rem,20vw,15rem);height:2.1rem;object-fit:cover;object-position:center;transform:translateX(-1rem);flex:0 1 auto;" />` : ""}
+    </div>
+    <section style="background:#ffffff;border:1px solid #cce4d0;border-radius:14px;box-shadow:0 14px 35px rgba(18, 51, 33, 0.08);padding:0.9rem;">
+      <h1 style="margin:0;font-size:18px;line-height:1.2;">${escapeHtml(userName)} — week view</h1>
+      <p style="margin:0.35rem 0 0.85rem;font-size:12px;color:#3a5345;">${escapeHtml(caption)}</p>
+      <div style="display:flex;gap:6px;align-items:flex-start;max-width:100%;overflow-x:auto;">
+      <div style="width:48px;flex-shrink:0;">${timeAxis}</div>
+      <div style="display:flex;flex:1;min-width:520px;gap:0;">${cols}</div>
+      </div>
+    </section>
   </div>
   </body></html>`
 }

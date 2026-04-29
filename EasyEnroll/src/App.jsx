@@ -28,6 +28,12 @@ import {
   getYearAwareRecommendations,
 } from "./utils/degreeProgress"
 import {
+  formatMissingPrerequisites,
+  formatPrerequisiteList,
+  formatSuggestedYears,
+  getMissingPrerequisiteIds,
+} from "./utils/prerequisites"
+import {
   clearAuthSession,
   loadAuthSession,
   loadUserBucket,
@@ -408,6 +414,7 @@ function formatCourseMeta(course) {
 
 function CourseCard({
   course,
+  courseMap,
   degreeLabels,
   onOpen,
   onAdd,
@@ -418,6 +425,9 @@ function CourseCard({
   actionTitle,
   compact = false,
 }) {
+  const suggestedYearsText = formatSuggestedYears(course.suggestedYears)
+  const prerequisiteText = formatPrerequisiteList(course.prerequisites, courseMap)
+
   return (
     <article
       className={`course-card${compact ? " course-card--compact" : ""}`}
@@ -448,6 +458,8 @@ function CourseCard({
       </header>
       <p className="course-card__title">{course.title}</p>
       <p className="course-card__meta">{formatCourseMeta(course)}</p>
+      <p className="course-card__meta">Suggested years: {suggestedYearsText}</p>
+      <p className="course-card__meta">Prereqs: {prerequisiteText}</p>
       {!compact && (
         <>
           <p className="course-card__meta">Class Time: {meetingLabel(course.meetingTimes)}</p>
@@ -483,7 +495,6 @@ function CourseCard({
     </article>
   )
 }
-
 function PlanningConflictCard({ conflict, courses }) {
   if (conflict.type === "course") {
     const ca = courses.find((c) => c.id === conflict.a)
@@ -632,8 +643,11 @@ function Modal({ title, children, onClose, actions }) {
 
 function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
   const [targetRect, setTargetRect] = useState(null)
-  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, placement: "center" })
-  const [isTargetSettled, setIsTargetSettled] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState(() => ({
+    top: typeof window !== "undefined" ? Math.max(80, window.innerHeight * 0.28) : 80,
+    left: typeof window !== "undefined" ? Math.max(24, window.innerWidth * 0.5 - 160) : 24,
+    placement: "center",
+  }))
   const tooltipRef = useRef(null)
 
   useEffect(() => {
@@ -660,18 +674,13 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
     }
 
     const setRectIfChanged = (nextRect) => {
+      if (!nextRect || nextRect.width < 6 || nextRect.height < 6) {
+        return
+      }
       setTargetRect((prev) => {
-        const next = rectChanged(prev, nextRect) ? nextRect : prev
-        if (next !== prev) {
-          setIsTargetSettled(false)
-          window.clearTimeout(settleTimer)
-          settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
-        }
-        return next
+        return rectChanged(prev, nextRect) ? nextRect : prev
       })
     }
-
-    let settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
 
     const bindTarget = (target) => {
       activeTarget = target
@@ -683,7 +692,8 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       }
       update()
       if (typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" })
+        // Use instant scroll for tour targeting so overlay moves once to final position.
+        target.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
       }
       window.addEventListener("resize", update)
       window.addEventListener("scroll", update, true)
@@ -716,7 +726,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
         return
       }
       if (performance.now() - startedAt > 1400) {
-        setTargetRect(null)
         return
       }
       rafId = window.requestAnimationFrame(pollForTarget)
@@ -735,7 +744,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       if (rafId) {
         window.cancelAnimationFrame(rafId)
       }
-      window.clearTimeout(settleTimer)
       if (observer) {
         observer.disconnect()
       }
@@ -749,11 +757,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       return
     }
     if (!targetRect) {
-      setTooltipPos({
-        top: Math.max(80, window.innerHeight * 0.28),
-        left: Math.max(24, window.innerWidth * 0.5 - 160),
-        placement: "center",
-      })
       return
     }
     const tooltipRect = tooltip.getBoundingClientRect()
@@ -828,7 +831,7 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
   const progress = totalSteps > 0 ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0
-  const spotlightRect = targetRect && isTargetSettled
+  const spotlightRect = targetRect
     ? {
         top: Math.max(0, targetRect.top - 8),
         left: Math.max(0, targetRect.left - 8),
@@ -1320,6 +1323,16 @@ function App() {
     [enrolledIds],
   )
 
+  const courseMap = useMemo(() => {
+    if (!courses || courses.length === 0) return new Map()
+    return new Map(courses.map((course) => [course.id, course]))
+  }, [courses])
+
+  const enrolledCompletionIds = useMemo(() => {
+    if (!enrolledIds || enrolledIds.length === 0) return new Set()
+    return new Set(enrolledIds)
+  }, [enrolledIds])
+
   const enrolledCredits = useMemo(
     () => enrolledCourses.reduce((sum, course) => sum + course.credits, 0),
     [enrolledCourses],
@@ -1377,6 +1390,19 @@ function App() {
     () => plans.find((plan) => plan.id === activePlanId) || null,
     [plans, activePlanId],
   )
+
+  const planningCompletionIds = useMemo(() => {
+    if (!enrolledIds) {
+      return new Set()
+    }
+    const ids = new Set(enrolledIds)
+    if (activePlan) {
+      for (const courseId of activePlan.courseIds) {
+        ids.add(courseId)
+      }
+    }
+    return ids
+  }, [enrolledIds, activePlan])
 
   useEffect(() => {
     if (plans.length === 0) {
@@ -1455,6 +1481,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     pop.document.open()
     pop.document.write(html)
@@ -1582,6 +1612,15 @@ function App() {
     if (enrolledIds.includes(course.id)) {
       pushToast("error", `${course.id} is already in your schedule.`)
       return { added: false, reason: "duplicate" }
+    }
+
+    const missingPrereqs = getMissingPrerequisiteIds(course, enrolledCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)} before you can enroll.`,
+      )
+      return { added: false, reason: "prerequisites" }
     }
 
     if (course.seatsAvailable === 0 && !course.waitlistOpen) {
@@ -1739,6 +1778,15 @@ function App() {
       return
     }
 
+    const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)} before it can be added to this plan.`,
+      )
+      return
+    }
+
     const other = plannedCourses
     const classHit = hasCourseConflict(course, other)
     const evHits = getEventConflicts(course, events)
@@ -1814,6 +1862,7 @@ function App() {
       }
 
       const duplicate = workingIds.includes(course.id)
+      const missingPrereqs = getMissingPrerequisiteIds(course, workingIds)
       const seatBlocked = course.seatsAvailable === 0 && !course.waitlistOpen
       const creditBlocked = workingCredits + course.credits > MAX_CREDITS
       const classConflict = hasCourseConflict(
@@ -1822,9 +1871,11 @@ function App() {
       )
       const eventConflict = getEventConflicts(course, events).length > 0
 
-      if (duplicate || seatBlocked || creditBlocked || classConflict || eventConflict) {
+      if (duplicate || missingPrereqs.length > 0 || seatBlocked || creditBlocked || classConflict || eventConflict) {
         const reason = duplicate
           ? "Already enrolled"
+          : missingPrereqs.length > 0
+            ? `Missing prerequisites: ${formatMissingPrerequisites(course, workingIds, courseMap)}`
           : seatBlocked
             ? "Seat / waitlist unavailable"
             : creditBlocked
@@ -2048,7 +2099,7 @@ function App() {
       return
     }
     calendarPopoutSourceRef.current = source
-    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=800")
+    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=650")
     if (!popup) {
       pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
       return
@@ -2073,6 +2124,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     popup.document.open()
     popup.document.write(html)
@@ -2367,12 +2422,19 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={addCourseToEnrollment}
                     addLabel="Add"
                     compact={settings.compactCatalog}
                     draggable
+                    actionDisabled={getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0}
+                    actionTitle={
+                      getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0
+                        ? `Missing prerequisites: ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)}`
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -2391,6 +2453,7 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={removeEnrolledCourse}
@@ -2948,19 +3011,23 @@ function App() {
                       const blockedByCap = Boolean(
                         activePlan && !inPlan && plannedCredits + course.credits > MAX_CREDITS,
                       )
+                      const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
                       return (
                         <CourseCard
                           key={`${course.id}-planner`}
                           course={course}
+                          courseMap={courseMap}
                           degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                           onOpen={setSelectedCourse}
                           onAdd={addToPlan}
                           addLabel="Add to plan"
                           compact={settings.compactCatalog}
                           actionVariant="secondary"
-                          actionDisabled={!activePlan || inPlan || blockedByCap}
+                          actionDisabled={!activePlan || inPlan || blockedByCap || missingPrereqs.length > 0}
                           actionTitle={
-                            blockedByCap
+                            missingPrereqs.length > 0
+                              ? `Missing prerequisites: ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)}`
+                              : blockedByCap
                               ? PLANNING_CREDIT_CAP_MESSAGE
                               : !activePlan
                                 ? "Select or create a plan first."
@@ -2996,6 +3063,7 @@ function App() {
                       <CourseCard
                         key={`${course.id}-planned`}
                         course={course}
+                        courseMap={courseMap}
                         degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                         onOpen={setSelectedCourse}
                         onAdd={() => removeFromPlan(course.id)}
@@ -3497,7 +3565,7 @@ function App() {
                     />
                     Reduce interface motion (also respects your system’s “reduced motion” when set to off)
                   </label>
-                  <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
+                  <p className="muted settings-hint">
                     When the OS already requests reduced motion, the calmer experience applies even with this unset.
                   </p>
                   <label className="toggle-row">
@@ -3746,6 +3814,12 @@ function App() {
                 <button
                   className="btn btn--primary"
                   type="button"
+                  disabled={getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0}
+                  title={
+                    getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0
+                      ? `Missing prerequisites: ${formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}`
+                      : undefined
+                  }
                   onClick={() => {
                     const c = selectedCourse
                     const r = addCourseToEnrollment(c)
@@ -3774,6 +3848,19 @@ function App() {
             <div className="course-detail__section">
               <h4 className="course-detail__label">Description</h4>
               <p className="course-detail__value">{selectedCourse.description}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Suggested years</h4>
+              <p className="course-detail__value">{formatSuggestedYears(selectedCourse.suggestedYears)}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Prerequisites</h4>
+              <p className="course-detail__value">{formatPrerequisiteList(selectedCourse.prerequisites, courseMap)}</p>
+              {getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0 && (
+                <p className="muted course-detail__fine">
+                  Missing for enrollment: {formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}
+                </p>
+              )}
             </div>
             <div className="course-detail__section">
               <h4 className="course-detail__label">Syllabus</h4>
