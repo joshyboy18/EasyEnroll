@@ -29,7 +29,7 @@ jobs:
       - run: npm install
         working-directory: ./EasyEnroll
 
-      - run: npm exec vite build --base=/EasyEnroll/
+      - run: npx vite build --base /EasyEnroll/
         working-directory: ./EasyEnroll
 
       - name: Deploy
