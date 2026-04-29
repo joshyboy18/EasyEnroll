@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
+import easyEnrollLoginLogo from "../EasyEnroll.png"
+import easyEnrollLogoIcon from "../EasyEnrollIcon.png"
+import easyEnrollLogoText from "../EasyEnrollText.png"
 import { TimeGridCalendar } from "./components/TimeGridCalendar.jsx"
 import { useToast } from "./components/ToastStack.jsx"
 import { loginWithSso } from "./utils/auth"
@@ -22,9 +25,14 @@ import {
 } from "./utils/conflicts"
 import {
   getCourseDegreeMatches,
-  getProgramNames,
   getYearAwareRecommendations,
 } from "./utils/degreeProgress"
+import {
+  formatMissingPrerequisites,
+  formatPrerequisiteList,
+  formatSuggestedYears,
+  getMissingPrerequisiteIds,
+} from "./utils/prerequisites"
 import {
   clearAuthSession,
   loadAuthSession,
@@ -49,10 +57,126 @@ const VIEW_WAYFINDING = {
   settings: "Settings — display, alerts, and accessibility for the planner.",
 }
 
+const APP_TOUR_STEPS = [
+  {
+    id: "nav",
+    view: "dashboard",
+    title: "Navigate the workspace",
+    body: "Use Enrollment, Planning, Profile, and Settings to jump between the main areas of Easy Enroll.",
+    target: '[data-tour="nav"]',
+    placement: "bottom",
+  },
+  {
+    id: "recommended",
+    view: "dashboard",
+    title: "Start with recommendations",
+    body: "These are year-aware suggestions that help you build a good first schedule quickly.",
+    target: '[data-tour="recommended"]',
+    placement: "bottom",
+  },
+  {
+    id: "search",
+    view: "dashboard",
+    title: "Filter the catalog",
+    body: "Search by course, department, or seat status to narrow down the list fast.",
+    target: '[data-tour="search"]',
+    placement: "bottom",
+  },
+  {
+    id: "available",
+    view: "dashboard",
+    title: "Pick available courses",
+    body: "Click a card for details or drag it into Enrolled Courses to build your term.",
+    target: '[data-tour="available-header"]',
+    placement: "right",
+  },
+  {
+    id: "enrolled",
+    view: "dashboard",
+    title: "Review enrolled courses",
+    body: "This is your current schedule. Remove items or confirm credit totals here.",
+    target: '[data-tour="enrolled-header"]',
+    placement: "left",
+  },
+  {
+    id: "calendar",
+    view: "dashboard",
+    title: "Check your weekly calendar",
+    body: "Use the calendar to confirm timing, avoid overlaps, and export a schedule file.",
+    target: '[data-tour="calendar-header"]',
+    placement: "bottom",
+  },
+  {
+    id: "planning-term",
+    view: "planning",
+    title: "Choose a planning term",
+    body: "Pick a target term for your what-if schedule drafts before importing anything to enrollment.",
+    target: '[data-tour="planning-term"]',
+    placement: "bottom",
+  },
+  {
+    id: "planning-search",
+    view: "planning",
+    title: "Build plan options",
+    body: "Use the same filters to add courses into a plan and compare alternatives before committing.",
+    target: '[data-tour="planning-search"]',
+    placement: "bottom",
+  },
+  {
+    id: "profile-info",
+    view: "profile",
+    title: "Review your profile snapshot",
+    body: "Profile shows your student information and registration context in one place.",
+    target: '[data-tour="profile-info"]',
+    placement: "top",
+  },
+  {
+    id: "profile-registration",
+    view: "profile",
+    title: "Check registration status",
+    body: "Use these values to confirm holds, standing, earned hours, and registration readiness.",
+    target: '[data-tour="profile-registration"]',
+    placement: "top",
+  },
+  {
+    id: "settings-controls",
+    view: "settings",
+    title: "Adjust planner behavior",
+    body: "Settings lets you tune calendar focus, catalog density, accessibility, and alerts.",
+    target: '[data-tour="settings-controls"]',
+    placement: "right",
+  },
+  {
+    id: "settings-help",
+    view: "settings",
+    title: "Use keyboard tips",
+    body: "This panel provides quick operational tips and keyboard guidance while you work.",
+    target: '[data-tour="settings-help"]',
+    placement: "left",
+  },
+]
+
 const LS_ONBOARD_ENROLLMENT = "easyenroll.dismissOnboarding.enrollment"
 const LS_ONBOARD_PLANNING = "easyenroll.dismissOnboarding.planning"
 /** @deprecated kept in sync when enrollment onboarding is dismissed */
 const LS_DISMISS_WELCOME_LEGACY = "easyenroll.dismissWelcome"
+const LS_TOUR_ENROLLMENT = "easyenroll.tour.enrollment"
+const LS_TOUR_WELCOME = "easyenroll.tour.welcome"
+
+function readLocalFlag(key) {
+  if (typeof localStorage === "undefined") {
+    return false
+  }
+  return localStorage.getItem(key) === "1"
+}
+
+function writeLocalFlag(key) {
+  try {
+    localStorage.setItem(key, "1")
+  } catch {
+    /* ignore */
+  }
+}
 
 function enrollmentOnboardingInitiallyDismissed() {
   if (typeof localStorage === "undefined") {
@@ -85,6 +209,22 @@ function persistPlanningOnboardingDismissed() {
   }
 }
 
+function enrollmentTourInitiallyCompleted() {
+  return readLocalFlag(LS_TOUR_ENROLLMENT)
+}
+
+function persistEnrollmentTourCompleted() {
+  writeLocalFlag(LS_TOUR_ENROLLMENT)
+}
+
+function tourWelcomeInitiallyDismissed() {
+  return readLocalFlag(LS_TOUR_WELCOME)
+}
+
+function persistTourWelcomeDismissed() {
+  writeLocalFlag(LS_TOUR_WELCOME)
+}
+
 const EVENT_COLOR_PRESETS = ["#b8e1ff", "#ffd6e8", "#d8f3dc", "#ffe8b6", "#e2d4ff", "#cfeff7"]
 
 const defaultSettings = {
@@ -97,8 +237,6 @@ const defaultSettings = {
   highContrast: false,
   /** Tighter course cards in catalog lists. */
   compactCatalog: false,
-  /** In-memory only: count UI actions and show in Settings. */
-  trackSessionStats: true,
 }
 
 function mergeSettingsWithDefaults(stored) {
@@ -134,6 +272,136 @@ function defaultProfileFromUser(user) {
   return { name: user.name, emailLocal: local, avatarDataUrl: "" }
 }
 
+function getNextSemesterLabel(termLabel) {
+  const match = String(termLabel).match(/^(Spring|Fall)\s+(\d{4})$/i)
+  if (!match) {
+    return "Next semester"
+  }
+
+  const season = match[1].toLowerCase()
+  const year = Number(match[2])
+  if (season === "spring") {
+    return `Fall ${year}`
+  }
+  if (season === "fall") {
+    return `Spring ${year + 1}`
+  }
+  return "Next semester"
+}
+
+function getClassStandingLabel(classYear) {
+  const standings = ["Freshman", "Sophomore", "Junior", "Senior"]
+  const index = Math.min(Math.max(Number(classYear) || 1, 1), standings.length) - 1
+  return standings[index]
+}
+
+function getRegistrationSnapshot(classYear) {
+  const earnedHoursByClassYear = {
+    1: { institutional: 15, transfer: 0 },
+    2: { institutional: 42, transfer: 3 },
+    3: { institutional: 60, transfer: 12 },
+    4: { institutional: 75, transfer: 20 },
+  }
+  const earnedHours = earnedHoursByClassYear[classYear] ?? earnedHoursByClassYear[1]
+
+  return {
+    termLabel: getNextSemesterLabel(ENROLLMENT_TERM_LABEL),
+    studentStatus: "Permits registration",
+    academicStatus: "Good Academic Standing permits registration",
+    holds: "No holds on record",
+    earnedHours: `${earnedHours.institutional} institutional hours, ${earnedHours.transfer} transfer hours`,
+    classStanding: getClassStandingLabel(classYear),
+  }
+}
+
+function getStudentInformationSnapshot(user) {
+  // 1. Level Calculation
+  const levelByClassYear = {
+    1: "Freshman",
+    2: "Sophomore",
+    3: "Junior",
+    4: "Senior",
+  };
+  const level = levelByClassYear[user.classYear] ?? "Undergraduate";
+
+  // 2. Academic Mapping (Major, Dept, Degree, Specific College)
+  // We can easily add more programs to this dictionary as the app grows.
+  const programDirectory = {
+    "bs-cs": {
+      major: "Computer Science",
+      department: "Computer Science",
+      degree: "Bachelor of Science",
+      college: "Gallogly College of Engineering"
+    },
+    "bs-bio": {
+      major: "Biology",
+      department: "Biological Sciences",
+      degree: "Bachelor of Science",
+      college: "College of Science"
+    },
+    "ba-eng": {
+      major: "English",
+      department: "English Literature",
+      degree: "Bachelor of Arts",
+      college: "College of Arts and Sciences"
+    }
+  };
+
+  // Find the primary major (ignoring minors) from the user's programs
+  const primaryProgramId = user.programs.find(p => !p.startsWith('minor-')) || user.programs[0];
+  
+  // Fallback data just in case a user has a program not in our directory
+  const academicData = programDirectory[primaryProgramId] || {
+    major: "Undeclared",
+    department: "General Counseling",
+    degree: "Undergraduate Degree",
+    college: "University College"
+  };
+
+  // 3. College Logic (General College for Year 1, Specific College for Year 2+)
+  const assignedCollege = user.classYear < 2 ? "General College" : academicData.college;
+
+  // 4. Admit Term and Type Logic
+  // We calculate the base fall entry year by subtracting class year from the current year (2026)
+  const baseAdmitYear = 2026 - user.classYear;
+  let admitTerm, admitType;
+
+  switch (user.admitProfile) {
+    case "direct-spring":
+      admitTerm = `Spring ${baseAdmitYear + 1}`;
+      admitType = "Spring Admit - Direct Entry";
+      break;
+    case "delayed-semester":
+      admitTerm = `Spring ${baseAdmitYear + 1}`;
+      admitType = "Delayed Entry - 1 Semester";
+      break;
+    case "delayed-year":
+      // They started in the Fall, but they were delayed by a year+ after high school
+      admitTerm = `Fall ${baseAdmitYear}`;
+      admitType = "Delayed Entry - 1+ Years";
+      break;
+    case "direct-fall":
+    default:
+      admitTerm = `Fall ${baseAdmitYear}`;
+      admitType = "Direct From High School";
+      break;
+  }
+
+  // 5. Return the dynamic snapshot
+  return {
+    level: level,
+    college: assignedCollege,
+    degree: academicData.degree,
+    program: academicData.degree, // Or map this uniquely if 'Program' differs from 'Degree'
+    campus: "Main Campus", // Can be hardcoded unless you have multiple campuses
+    catalogTerm: admitTerm, // Usually matches the term they were admitted
+    admitTerm: admitTerm,
+    admitType: admitType,
+    major: academicData.major,
+    department: academicData.department,
+  };
+}
+
 function formatCourseMeta(course) {
   const seatText =
     course.seatsAvailable > 0
@@ -146,6 +414,7 @@ function formatCourseMeta(course) {
 
 function CourseCard({
   course,
+  courseMap,
   degreeLabels,
   onOpen,
   onAdd,
@@ -156,6 +425,9 @@ function CourseCard({
   actionTitle,
   compact = false,
 }) {
+  const suggestedYearsText = formatSuggestedYears(course.suggestedYears)
+  const prerequisiteText = formatPrerequisiteList(course.prerequisites, courseMap)
+
   return (
     <article
       className={`course-card${compact ? " course-card--compact" : ""}`}
@@ -186,6 +458,8 @@ function CourseCard({
       </header>
       <p className="course-card__title">{course.title}</p>
       <p className="course-card__meta">{formatCourseMeta(course)}</p>
+      <p className="course-card__meta">Suggested years: {suggestedYearsText}</p>
+      <p className="course-card__meta">Prereqs: {prerequisiteText}</p>
       {!compact && (
         <>
           <p className="course-card__meta">Class Time: {meetingLabel(course.meetingTimes)}</p>
@@ -221,7 +495,6 @@ function CourseCard({
     </article>
   )
 }
-
 function PlanningConflictCard({ conflict, courses }) {
   if (conflict.type === "course") {
     const ca = courses.find((c) => c.id === conflict.a)
@@ -368,6 +641,270 @@ function Modal({ title, children, onClose, actions }) {
   )
 }
 
+function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
+  const [targetRect, setTargetRect] = useState(null)
+  const [tooltipPos, setTooltipPos] = useState(() => ({
+    top: typeof window !== "undefined" ? Math.max(80, window.innerHeight * 0.28) : 80,
+    left: typeof window !== "undefined" ? Math.max(24, window.innerWidth * 0.5 - 160) : 24,
+    placement: "center",
+  }))
+  const tooltipRef = useRef(null)
+
+  useEffect(() => {
+    if (!step) {
+      return
+    }
+    let activeTarget = null
+    let rafId = 0
+    let observer = null
+    let released = false
+    let stopListening = () => {}
+
+    const rectChanged = (a, b) => {
+      if (!a || !b) {
+        return true
+      }
+      const threshold = 1
+      return (
+        Math.abs(a.top - b.top) > threshold ||
+        Math.abs(a.left - b.left) > threshold ||
+        Math.abs(a.width - b.width) > threshold ||
+        Math.abs(a.height - b.height) > threshold
+      )
+    }
+
+    const setRectIfChanged = (nextRect) => {
+      if (!nextRect || nextRect.width < 6 || nextRect.height < 6) {
+        return
+      }
+      setTargetRect((prev) => {
+        return rectChanged(prev, nextRect) ? nextRect : prev
+      })
+    }
+
+    const bindTarget = (target) => {
+      activeTarget = target
+      const update = () => {
+        if (!activeTarget) {
+          return
+        }
+        setRectIfChanged(activeTarget.getBoundingClientRect())
+      }
+      update()
+      if (typeof target.scrollIntoView === "function") {
+        // Use instant scroll for tour targeting so overlay moves once to final position.
+        target.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
+      }
+      window.addEventListener("resize", update)
+      window.addEventListener("scroll", update, true)
+      stopListening = () => {
+        window.removeEventListener("resize", update)
+        window.removeEventListener("scroll", update, true)
+      }
+    }
+
+    const resolveTarget = () => {
+      const nextTarget = document.querySelector(step.target)
+      if (!nextTarget) {
+        return false
+      }
+      if (nextTarget !== activeTarget) {
+        stopListening()
+        bindTarget(nextTarget)
+      } else {
+        setRectIfChanged(nextTarget.getBoundingClientRect())
+      }
+      return true
+    }
+
+    const startedAt = performance.now()
+    const pollForTarget = () => {
+      if (released) {
+        return
+      }
+      if (resolveTarget()) {
+        return
+      }
+      if (performance.now() - startedAt > 1400) {
+        return
+      }
+      rafId = window.requestAnimationFrame(pollForTarget)
+    }
+
+    if (!resolveTarget()) {
+      rafId = window.requestAnimationFrame(pollForTarget)
+      observer = new MutationObserver(() => {
+        resolveTarget()
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+    }
+
+    return () => {
+      released = true
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      if (observer) {
+        observer.disconnect()
+      }
+      stopListening()
+    }
+  }, [step])
+
+  useEffect(() => {
+    const tooltip = tooltipRef.current
+    if (!tooltip) {
+      return
+    }
+    if (!targetRect) {
+      return
+    }
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const spacing = 16
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const preferred = step?.placement || "bottom"
+
+    const fits = {
+      top: targetRect.top >= tooltipRect.height + spacing,
+      bottom: vh - targetRect.bottom >= tooltipRect.height + spacing,
+      left: targetRect.left >= tooltipRect.width + spacing,
+      right: vw - targetRect.right >= tooltipRect.width + spacing,
+    }
+
+    const available = {
+      top: targetRect.top,
+      bottom: vh - targetRect.bottom,
+      left: targetRect.left,
+      right: vw - targetRect.right,
+    }
+
+    let placement = preferred
+    if (!fits[placement]) {
+      const ordered = ["bottom", "right", "left", "top"]
+      placement = ordered.find((p) => fits[p]) || ordered.sort((a, b) => available[b] - available[a])[0]
+    }
+
+    let top = targetRect.bottom + spacing
+    let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2
+
+    if (placement === "top") {
+      top = targetRect.top - spacing - tooltipRect.height
+    }
+    if (placement === "left") {
+      left = targetRect.left - spacing - tooltipRect.width
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
+    }
+    if (placement === "right") {
+      left = targetRect.right + spacing
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
+    }
+
+    top = Math.min(Math.max(top, spacing), vh - tooltipRect.height - spacing)
+    left = Math.min(Math.max(left, spacing), vw - tooltipRect.width - spacing)
+    setTooltipPos({ top, left, placement })
+  }, [step, targetRect])
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [])
+
+  if (!step) {
+    return null
+  }
+
+  const progress = totalSteps > 0 ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0
+  const spotlightRect = targetRect
+    ? {
+        top: Math.max(0, targetRect.top - 8),
+        left: Math.max(0, targetRect.left - 8),
+        width: Math.max(0, targetRect.width + 16),
+        height: Math.max(0, targetRect.height + 16),
+      }
+    : null
+
+  const overlayMasks = spotlightRect
+    ? [
+        { top: 0, left: 0, width: viewportWidth, height: spotlightRect.top },
+        { top: spotlightRect.top, left: 0, width: spotlightRect.left, height: spotlightRect.height },
+        {
+          top: spotlightRect.top,
+          left: spotlightRect.left + spotlightRect.width,
+          width: Math.max(0, viewportWidth - (spotlightRect.left + spotlightRect.width)),
+          height: spotlightRect.height,
+        },
+        {
+          top: spotlightRect.top + spotlightRect.height,
+          left: 0,
+          width: viewportWidth,
+          height: Math.max(0, viewportHeight - (spotlightRect.top + spotlightRect.height)),
+        },
+      ]
+    : [{ top: 0, left: 0, width: viewportWidth, height: viewportHeight }]
+
+  return (
+    <div className="tour-overlay" role="dialog" aria-modal="true" aria-label={step.title}>
+      {overlayMasks.map((mask, index) => (
+        <div
+          key={`mask-${index}`}
+          className="tour-overlay__mask"
+          style={{ top: mask.top, left: mask.left, width: mask.width, height: mask.height }}
+        />
+      ))}
+      {spotlightRect && <div className="tour-highlight" style={spotlightRect} />}
+      <div
+        ref={tooltipRef}
+        className={`tour-tooltip tour-tooltip--${tooltipPos.placement}`}
+        style={{ top: tooltipPos.top, left: tooltipPos.left }}
+      >
+        <div className="tour-progress">
+          <div className="tour-progress__header">
+            <span>
+              Step {stepIndex + 1} of {totalSteps}
+            </span>
+            <span>{progress}%</span>
+          </div>
+          <div className="tour-progress__bar" aria-hidden="true">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+        <h3 className="tour-tooltip__title">{step.title}</h3>
+        <p className="tour-tooltip__body">{step.body}</p>
+        <div className="tour-tooltip__actions">
+          <button className="btn btn--subtle" type="button" onClick={onClose}>
+            Skip tour
+          </button>
+          <div className="tour-tooltip__nav">
+            <button className="btn btn--subtle" type="button" onClick={onPrev} disabled={stepIndex === 0}>
+              Back
+            </button>
+            <button className="btn btn--primary" type="button" onClick={onNext}>
+              {stepIndex + 1 === totalSteps ? "Finish" : "Next"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LoginPage({
   ssoUserId,
   setSsoUserId,
@@ -377,7 +914,7 @@ function LoginPage({
   return (
     <main className="login-page">
       <section className="login-card">
-        <h1>Easy Enroll</h1>
+        <img className="login-logo" src={easyEnrollLoginLogo} alt="Easy Enroll" />
         <p>Choose your SSO identity to access your enrollment dashboard and saved plans.</p>
         <label>
           SSO Identity
@@ -480,6 +1017,19 @@ function App() {
   const [planningOnboardingDismissed, setPlanningOnboardingDismissed] = useState(
     planningOnboardingInitiallyDismissed,
   )
+  const [enrollmentTourCompleted, setEnrollmentTourCompleted] = useState(
+    enrollmentTourInitiallyCompleted,
+  )
+  const [tourWelcomeDismissed, setTourWelcomeDismissed] = useState(
+    tourWelcomeInitiallyDismissed,
+  )
+  const [tourIntroOpen, setTourIntroOpen] = useState(false)
+  const [tourState, setTourState] = useState({ active: null, stepIndex: 0 })
+  const [onboardingChecklist, setOnboardingChecklist] = useState({
+    filteredCatalog: false,
+    addedCourse: false,
+    openedCalendar: false,
+  })
   const [planningContext, setPlanningContext] = useState(() =>
     initialUser
       ? normalizePlanningContext(loadUserBucket(initialUser.id, "planningContext", null))
@@ -500,24 +1050,6 @@ function App() {
   /** @type {React.MutableRefObject<"enrollment" | "planning">} */
   const calendarPopoutSourceRef = useRef("enrollment")
   const keyboardLayerRef = useRef({})
-  const sessionStatsRef = useRef({
-    filterClears: 0,
-    filterPresets: 0,
-    enrollSuccess: 0,
-    planImports: 0,
-    planExportDownloads: 0,
-    planImportUploads: 0,
-  })
-  const [, setSessionStatsRender] = useState(0)
-  const bumpSession = useCallback(
-    (key) => {
-      sessionStatsRef.current[key] += 1
-      if (settings.trackSessionStats) {
-        setSessionStatsRender((n) => n + 1)
-      }
-    },
-    [settings.trackSessionStats],
-  )
 
   const currentUser = useMemo(
     () => mockUsers.find((entry) => entry.id === session?.userId) || null,
@@ -525,6 +1057,18 @@ function App() {
   )
 
   const classYear = currentUser?.classYear ?? 1
+  const registrationSnapshot = useMemo(
+    () => getRegistrationSnapshot(classYear),
+    [classYear],
+  )
+
+  const studentInformationSnapshot = useMemo(() => {
+    // If nobody is logged in yet, return an empty object to prevent a crash
+    if (!currentUser) {
+      return {}; 
+    }
+    return getStudentInformationSnapshot(currentUser);
+  }, [currentUser]);
 
   const planningTermOption = useMemo(
     () => getPlanningTermOption(planningContext.targetTermId),
@@ -535,6 +1079,11 @@ function App() {
     () => JSON.stringify(plans) !== lastSavedPlansJson,
     [plans, lastSavedPlansJson],
   )
+
+  const tourActive = tourState.active === "app"
+  const tourSteps = APP_TOUR_STEPS
+  const activeTourStep = tourActive ? tourSteps[tourState.stepIndex] : null
+  const tourCtaLabel = enrollmentTourCompleted ? "Replay tour" : "Start tour"
 
   const goToView = useCallback(
     (view) => {
@@ -547,6 +1096,37 @@ function App() {
     },
     [activeView, plansDirty],
   )
+
+  const dismissTourIntro = useCallback(() => {
+    setTourIntroOpen(false)
+    if (!tourWelcomeDismissed) {
+      persistTourWelcomeDismissed()
+      setTourWelcomeDismissed(true)
+    }
+  }, [tourWelcomeDismissed])
+
+  const startEnrollmentTour = useCallback(
+    (fromIntro = false) => {
+      setActiveView("dashboard")
+      setTourState({ active: "app", stepIndex: 0 })
+      if (!tourWelcomeDismissed) {
+        persistTourWelcomeDismissed()
+        setTourWelcomeDismissed(true)
+      }
+      if (fromIntro) {
+        setTourIntroOpen(false)
+      }
+    },
+    [tourWelcomeDismissed],
+  )
+
+  const endEnrollmentTour = useCallback((completed = false) => {
+    setTourState({ active: null, stepIndex: 0 })
+    if (completed) {
+      persistEnrollmentTourCompleted()
+      setEnrollmentTourCompleted(true)
+    }
+  }, [])
 
   const hydrateUserState = (user) => {
     const nextEnrolled = loadUserBucket(user.id, "enrolled", [])
@@ -623,6 +1203,29 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-motion", reduceMotionActive)
   }, [reduceMotionActive])
+
+  useEffect(() => {
+    if (session && currentUser && !tourWelcomeDismissed) {
+      setTourIntroOpen(true)
+    }
+  }, [session, currentUser, tourWelcomeDismissed])
+
+  useEffect(() => {
+    if (!tourActive || !activeTourStep?.view) {
+      return
+    }
+    if (activeView !== activeTourStep.view) {
+      setActiveView(activeTourStep.view)
+    }
+  }, [tourActive, activeTourStep, activeView])
+
+  useEffect(() => {
+    if (searchText || departmentFilter !== "All" || seatFilter !== "all" || programOnly) {
+      setOnboardingChecklist((prev) =>
+        prev.filteredCatalog ? prev : { ...prev, filteredCatalog: true },
+      )
+    }
+  }, [searchText, departmentFilter, seatFilter, programOnly])
 
   const clearEnrollmentUndo = useCallback(() => {
     if (enrollmentUndoTimerRef.current) {
@@ -720,6 +1323,16 @@ function App() {
     [enrolledIds],
   )
 
+  const courseMap = useMemo(() => {
+    if (!courses || courses.length === 0) return new Map()
+    return new Map(courses.map((course) => [course.id, course]))
+  }, [courses])
+
+  const enrolledCompletionIds = useMemo(() => {
+    if (!enrolledIds || enrolledIds.length === 0) return new Set()
+    return new Set(enrolledIds)
+  }, [enrolledIds])
+
   const enrolledCredits = useMemo(
     () => enrolledCourses.reduce((sum, course) => sum + course.credits, 0),
     [enrolledCourses],
@@ -777,6 +1390,19 @@ function App() {
     () => plans.find((plan) => plan.id === activePlanId) || null,
     [plans, activePlanId],
   )
+
+  const planningCompletionIds = useMemo(() => {
+    if (!enrolledIds) {
+      return new Set()
+    }
+    const ids = new Set(enrolledIds)
+    if (activePlan) {
+      for (const courseId of activePlan.courseIds) {
+        ids.add(courseId)
+      }
+    }
+    return ids
+  }, [enrolledIds, activePlan])
 
   useEffect(() => {
     if (plans.length === 0) {
@@ -855,6 +1481,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     pop.document.open()
     pop.document.write(html)
@@ -881,7 +1511,6 @@ function App() {
   }, [plansDirty, activeView])
 
   const clearFilters = () => {
-    bumpSession("filterClears")
     setSearchText("")
     setDepartmentFilter("All")
     setSeatFilter("all")
@@ -893,7 +1522,6 @@ function App() {
       clearFilters()
       return
     }
-    bumpSession("filterPresets")
     if (preset === "open") {
       setSeatFilter("open")
       setProgramOnly(false)
@@ -986,6 +1614,15 @@ function App() {
       return { added: false, reason: "duplicate" }
     }
 
+    const missingPrereqs = getMissingPrerequisiteIds(course, enrolledCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)} before you can enroll.`,
+      )
+      return { added: false, reason: "prerequisites" }
+    }
+
     if (course.seatsAvailable === 0 && !course.waitlistOpen) {
       pushToast("error", `${course.id} has no open seats and the waitlist is closed.`)
       return { added: false, reason: "seat_rule" }
@@ -1019,7 +1656,9 @@ function App() {
     }
 
     setEnrolledIds((prev) => [...prev, course.id])
-    bumpSession("enrollSuccess")
+    setOnboardingChecklist((prev) =>
+      prev.addedCourse ? prev : { ...prev, addedCourse: true },
+    )
     pushToast("success", `${course.id} was added to your enrollment.`, {
       label: "View week calendar",
       onAction: () => setActiveView("dashboard"),
@@ -1139,6 +1778,15 @@ function App() {
       return
     }
 
+    const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)} before it can be added to this plan.`,
+      )
+      return
+    }
+
     const other = plannedCourses
     const classHit = hasCourseConflict(course, other)
     const evHits = getEventConflicts(course, events)
@@ -1214,6 +1862,7 @@ function App() {
       }
 
       const duplicate = workingIds.includes(course.id)
+      const missingPrereqs = getMissingPrerequisiteIds(course, workingIds)
       const seatBlocked = course.seatsAvailable === 0 && !course.waitlistOpen
       const creditBlocked = workingCredits + course.credits > MAX_CREDITS
       const classConflict = hasCourseConflict(
@@ -1222,9 +1871,11 @@ function App() {
       )
       const eventConflict = getEventConflicts(course, events).length > 0
 
-      if (duplicate || seatBlocked || creditBlocked || classConflict || eventConflict) {
+      if (duplicate || missingPrereqs.length > 0 || seatBlocked || creditBlocked || classConflict || eventConflict) {
         const reason = duplicate
           ? "Already enrolled"
+          : missingPrereqs.length > 0
+            ? `Missing prerequisites: ${formatMissingPrerequisites(course, workingIds, courseMap)}`
           : seatBlocked
             ? "Seat / waitlist unavailable"
             : creditBlocked
@@ -1243,7 +1894,6 @@ function App() {
     }
 
     setEnrolledIds(workingIds)
-    bumpSession("planImports")
 
     if (addedCount > 0) {
       pushToast(
@@ -1278,7 +1928,6 @@ function App() {
     a.download = "easyenroll-plans.json"
     a.click()
     URL.revokeObjectURL(url)
-    bumpSession("planExportDownloads")
     pushToast("success", "Downloaded a JSON backup of your plans.")
   }
 
@@ -1305,7 +1954,6 @@ function App() {
         if (currentUser) {
           saveUserBucket(currentUser.id, "plans", data)
         }
-        bumpSession("planImportUploads")
         pushToast("success", "Imported plans from JSON. Your previous in-browser plan list was replaced.")
       } catch {
         pushToast("error", "That file is not valid Easy Enroll plan JSON.")
@@ -1437,6 +2085,13 @@ function App() {
     setActiveView("dashboard")
     setPlanningContext({ targetTermId: DEFAULT_PLANNING_TARGET_TERM_ID })
     calendarPopoutSourceRef.current = "enrollment"
+    setTourIntroOpen(false)
+    setTourState({ active: null, stepIndex: 0 })
+    setOnboardingChecklist({
+      filteredCatalog: false,
+      addedCourse: false,
+      openedCalendar: false,
+    })
   }
 
   const openCalendarPopout = (source = "enrollment") => {
@@ -1444,12 +2099,17 @@ function App() {
       return
     }
     calendarPopoutSourceRef.current = source
-    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=800")
+    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=650")
     if (!popup) {
       pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
       return
     }
     popupRef.current = popup
+    if (source === "enrollment") {
+      setOnboardingChecklist((prev) =>
+        prev.openedCalendar ? prev : { ...prev, openedCalendar: true },
+      )
+    }
     const blocks = source === "planning" ? planningCalendarBlocks : dashboardBlocks
     const vw = source === "planning" ? planningViewWindow : dashboardViewWindow
     const termOpt = getPlanningTermOption(planningContext.targetTermId)
@@ -1464,6 +2124,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     popup.document.open()
     popup.document.write(html)
@@ -1481,15 +2145,17 @@ function App() {
       />
     )
   }
-
   return (
     <>
       <a className="skip-link" href="#page-main">
         Skip to main content
       </a>
       <header className="app-topbar">
-      <h1>Easy Enroll</h1>
-      <nav className="nav-row">
+      <div className="app-logo" aria-label="Easy Enroll">
+        <img className="app-logo__icon" src={easyEnrollLogoIcon} alt="" aria-hidden="true" />
+        <img className="app-logo__text" src={easyEnrollLogoText} alt="Easy Enroll" />
+      </div>
+      <nav className="nav-row" data-tour="nav">
         <button
           className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
           type="button"
@@ -1527,7 +2193,59 @@ function App() {
 
       <ToastContainer />
 
-      {!enrollmentOnboardingDismissed && activeView === "dashboard" && (
+      {tourIntroOpen && (
+        <Modal
+          title="Welcome to Easy Enroll"
+          onClose={dismissTourIntro}
+          actions={
+            <>
+              <button className="btn btn--subtle" type="button" onClick={dismissTourIntro}>
+                Maybe later
+              </button>
+              <button className="btn btn--primary" type="button" onClick={() => startEnrollmentTour(true)}>
+                Start tour
+              </button>
+            </>
+          }
+        >
+          <p>
+            We can walk you through Enrollment, Planning, Profile, and Settings so you can navigate the full product
+            confidently.
+          </p>
+          <div className="tour-intro">
+            <p className="tour-intro__title">You will see:</p>
+            <ul className="tour-intro__list">
+              <li>Navigation between Enrollment, Planning, Profile, and Settings.</li>
+              <li>How to filter and add courses to your term.</li>
+              <li>Planning drafts, profile snapshots, and accessibility controls.</li>
+            </ul>
+          </div>
+        </Modal>
+      )}
+
+      {tourActive && (
+        <TourOverlay
+          step={activeTourStep}
+          stepIndex={tourState.stepIndex}
+          totalSteps={tourSteps.length}
+          onNext={() => {
+            if (tourState.stepIndex + 1 >= tourSteps.length) {
+              endEnrollmentTour(true)
+            } else {
+              setTourState((prev) => ({ ...prev, stepIndex: prev.stepIndex + 1 }))
+            }
+          }}
+          onPrev={() => {
+            setTourState((prev) => ({
+              ...prev,
+              stepIndex: Math.max(0, prev.stepIndex - 1),
+            }))
+          }}
+          onClose={() => endEnrollmentTour(false)}
+        />
+      )}
+
+      {!enrollmentOnboardingDismissed && activeView === "dashboard" && !tourActive && (
         <div className="onboarding-notice" role="region" aria-label="Getting started with enrollment">
           <div className="onboarding-notice__body">
             <p className="onboarding-notice__title">
@@ -1549,17 +2267,37 @@ function App() {
                 <strong>Settings</strong> has calendar focus, contrast, and keyboard tips.
               </li>
             </ul>
+            <div className="onboarding-checklist" role="group" aria-label="Getting started checklist">
+              <p className="onboarding-checklist__title">Getting started checklist</p>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.filteredCatalog} readOnly />
+                Filter the catalog
+              </label>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.addedCourse} readOnly />
+                Add a course to enrollment
+              </label>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.openedCalendar} readOnly />
+                Open the weekly calendar
+              </label>
+            </div>
           </div>
-          <button
-            className="btn btn--subtle"
-            type="button"
-            onClick={() => {
-              persistEnrollmentOnboardingDismissed()
-              setEnrollmentOnboardingDismissed(true)
-            }}
-          >
-            Dismiss
-          </button>
+          <div className="onboarding-notice__actions">
+            <button className="btn btn--primary" type="button" onClick={() => startEnrollmentTour(false)}>
+              {tourCtaLabel}
+            </button>
+            <button
+              className="btn btn--subtle"
+              type="button"
+              onClick={() => {
+                persistEnrollmentOnboardingDismissed()
+                setEnrollmentOnboardingDismissed(true)
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -1584,7 +2322,7 @@ function App() {
 
       {activeView === "dashboard" && (
         <>
-          <section className="recommendation-panel">
+          <section className="recommendation-panel" data-tour="recommended">
             <h2>Recommended (next semester — year {classYear} focus)</h2>
             <div className="recommendation-grid">
               {recommendations.map((item) => (
@@ -1597,7 +2335,7 @@ function App() {
             </div>
           </section>
 
-          <section className="search-bar">
+          <section className="search-bar" data-tour="search">
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
@@ -1663,8 +2401,8 @@ function App() {
           </div>
 
           <section className="pane-grid">
-            <article className="pane">
-              <header>
+            <article className="pane" data-tour="available">
+              <header data-tour="available-header">
                 <h2>Available Courses</h2>
                 <p>Click for details. Drag to enroll.</p>
               </header>
@@ -1684,19 +2422,26 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={addCourseToEnrollment}
                     addLabel="Add"
                     compact={settings.compactCatalog}
                     draggable
+                    actionDisabled={getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0}
+                    actionTitle={
+                      getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0
+                        ? `Missing prerequisites: ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)}`
+                        : undefined
+                    }
                   />
                 ))}
               </div>
             </article>
 
-            <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToEnroll}>
-              <header>
+            <article className="pane" data-tour="enrolled" onDragOver={(event) => event.preventDefault()} onDrop={onDropToEnroll}>
+              <header data-tour="enrolled-header">
                 <h2>Enrolled Courses</h2>
                 <p>Drop here to enroll. Remove with confirmation.</p>
               </header>
@@ -1708,6 +2453,7 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={removeEnrolledCourse}
@@ -1725,8 +2471,8 @@ function App() {
             </article>
           </section>
 
-          <section className="calendar-section">
-            <header className="calendar-header">
+          <section className="calendar-section" data-tour="calendar">
+            <header className="calendar-header" data-tour="calendar-header">
               <h2>Weekly calendar</h2>
               <div className="calendar-header__actions">
                 <button
@@ -1806,7 +2552,7 @@ function App() {
 
       {activeView === "planning" && (
         <section className="planning-section">
-          <div className="planning-term-banner" role="region" aria-label="Planning target term">
+          <div className="planning-term-banner" data-tour="planning-term" role="region" aria-label="Planning target term">
             <div className="planning-term-banner__row">
               <label className="planning-term-banner__label">
                 <span className="planning-term-banner__label-text">Planning draft for</span>
@@ -1905,7 +2651,7 @@ function App() {
                 </button>
               </div>
 
-              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+              <section className="search-bar search-bar--planning" data-tour="planning-search" aria-label="Catalog search and filters">
                 <input
                   value={searchText}
                   onChange={(event) => setSearchText(event.target.value)}
@@ -2162,7 +2908,7 @@ function App() {
                 </div>
               )}
 
-              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+              <section className="search-bar search-bar--planning" data-tour="planning-search" aria-label="Catalog search and filters">
                 <input
                   value={searchText}
                   onChange={(event) => setSearchText(event.target.value)}
@@ -2265,19 +3011,23 @@ function App() {
                       const blockedByCap = Boolean(
                         activePlan && !inPlan && plannedCredits + course.credits > MAX_CREDITS,
                       )
+                      const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
                       return (
                         <CourseCard
                           key={`${course.id}-planner`}
                           course={course}
+                          courseMap={courseMap}
                           degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                           onOpen={setSelectedCourse}
                           onAdd={addToPlan}
                           addLabel="Add to plan"
                           compact={settings.compactCatalog}
                           actionVariant="secondary"
-                          actionDisabled={!activePlan || inPlan || blockedByCap}
+                          actionDisabled={!activePlan || inPlan || blockedByCap || missingPrereqs.length > 0}
                           actionTitle={
-                            blockedByCap
+                            missingPrereqs.length > 0
+                              ? `Missing prerequisites: ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)}`
+                              : blockedByCap
                               ? PLANNING_CREDIT_CAP_MESSAGE
                               : !activePlan
                                 ? "Select or create a plan first."
@@ -2313,6 +3063,7 @@ function App() {
                       <CourseCard
                         key={`${course.id}-planned`}
                         course={course}
+                        courseMap={courseMap}
                         degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                         onOpen={setSelectedCourse}
                         onAdd={() => removeFromPlan(course.id)}
@@ -2608,111 +3359,102 @@ function App() {
 
       {activeView === "profile" && (
         <section className="profile-section">
-          <h2>Profile</h2>
-          <p>Identity fields follow university policy.</p>
+          <h2>Student Profile</h2>
           <div className="profile-wide-card">
-            <div className="profile-group" aria-labelledby="profile-group-photo-heading">
-              <h3 className="profile-group__title" id="profile-group-photo-heading">
-                Photo
-              </h3>
-              <div className="profile-avatar-block">
-                {profile.avatarDataUrl ? (
-                  <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
-                ) : (
-                  <div className="profile-avatar profile-avatar--ph" aria-hidden>
-                    {(profile.name || currentUser.name)
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase()}
-                  </div>
-                )}
-                <label className="profile-file">
-                  Update photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(ev) => {
-                      const f = ev.target.files?.[0]
-                      if (!f) {
-                        return
-                      }
-                      const r = new FileReader()
-                      r.onload = () => {
-                        setProfile((prev) => ({ ...prev, avatarDataUrl: r.result }))
-                        pushToast("success", "Profile picture updated (stored locally in this browser).")
-                      }
-                      r.readAsDataURL(f)
-                    }}
-                  />
-                </label>
-              </div>
-            </div>
-
             <div className="profile-group profile-group--locked" aria-labelledby="profile-group-identity-heading">
-              <h3 className="profile-group__title" id="profile-group-identity-heading">
-                Identity (read-only)
-              </h3>
-              <p className="muted profile-group__lead">
-                Public / legal identity can’t be changed here — requests go through the university.
-              </p>
               <div className="profile-locked">
                 <p>
-                  <strong>Display name (read-only):</strong> {profile.name || currentUser.name}
+                  <strong>Student name:</strong> {profile.name || currentUser.name}
                 </p>
-                  <p>
-                    <strong>Programs: </strong> {getProgramNames(currentUser.programs).join("; ")}
-                  </p>
-                <p className="muted">Legal name and password are managed by the university directory.</p>
-                <div className="profile-request-row">
-                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
-                    Request name change
-                  </button>
-                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "password" })}>
-                    Request password change
-                  </button>
-                </div>
+                <p>
+                  <strong> School Email:  </strong> {(profile.emailLocal || "username").trim()}{SCHOOL_EMAIL_DOMAIN}
+                </p>
               </div>
             </div>
+          </div>
 
-            <div className="profile-group" aria-labelledby="profile-group-contact-heading">
-              <h3 className="profile-group__title" id="profile-group-contact-heading">
-                School email
+          <div className="profile-wide-card profile-information-card" data-tour="profile-info" aria-labelledby="profile-information-heading">
+            <div className="profile-group profile-group--information">
+              <h3 id="profile-information-heading" className="profile-group__title">
+                Student Information
               </h3>
-              <p className="muted profile-group__lead">
-                How a classmate or instructor might see your campus address. “Public preview” = this email line only — no
-                live directory.
-              </p>
-              <div className="profile-public-preview" aria-label="Public email preview">
-                <span className="muted">Preview:</span>{" "}
-                <strong>
-                  {(profile.emailLocal || "username").trim() || "username"}
-                  {SCHOOL_EMAIL_DOMAIN}
-                </strong>
-              </div>
-              <label>
-                Edit local part
-                <div className="email-split">
-                  <input
-                    value={profile.emailLocal}
-                    onChange={(event) => {
-                      const t = event.target.value.replace(/[^a-zA-Z0-9._-]/g, "")
-                      setProfile((prev) => ({ ...prev, emailLocal: t }))
-                    }}
-                    type="text"
-                    autoComplete="off"
-                    placeholder="username"
-                    aria-label="Email local part (before @)"
-                  />
-                  <span className="email-split__domain" aria-hidden>
-                    {SCHOOL_EMAIL_DOMAIN}
-                  </span>
+              <dl className="profile-information-grid">
+                <div className="profile-information-item">
+                  <dt>Level</dt>
+                  <dd>{studentInformationSnapshot.level}</dd>
                 </div>
-                <span className="muted" style={{ fontSize: "0.85rem" }}>
-                  You may edit only the part before @; the domain is fixed for university routing.
-                </span>
-              </label>
+                <div className="profile-information-item">
+                  <dt>College</dt>
+                  <dd>{studentInformationSnapshot.college}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Degree</dt>
+                  <dd>{studentInformationSnapshot.degree}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Program</dt>
+                  <dd>{studentInformationSnapshot.program}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Campus</dt>
+                  <dd>{studentInformationSnapshot.campus}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Catalog Term</dt>
+                  <dd>{studentInformationSnapshot.catalogTerm}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Admit Term</dt>
+                  <dd>{studentInformationSnapshot.admitTerm}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Admit Type</dt>
+                  <dd>{studentInformationSnapshot.admitType}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Major</dt>
+                  <dd>{studentInformationSnapshot.major}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Department</dt>
+                  <dd>{studentInformationSnapshot.department}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <div className="profile-wide-card profile-registration-card" data-tour="profile-registration" aria-labelledby="profile-registration-heading">
+            <div className="profile-group profile-group--registration">
+              <h3 id="profile-registration-heading" className="profile-group__title">
+                Registration Information
+              </h3>
+              <p></p>
+              <dl className="profile-registration-grid">
+                <div className="profile-registration-item">
+                  <dt>Semester</dt>
+                  <dd>{registrationSnapshot.termLabel}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Student status</dt>
+                  <dd>{registrationSnapshot.studentStatus}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Academic status</dt>
+                  <dd>{registrationSnapshot.academicStatus}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Student holds</dt>
+                  <dd>{registrationSnapshot.holds}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Earned hours</dt>
+                  <dd>{registrationSnapshot.earnedHours}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Class standing</dt>
+                  <dd>{registrationSnapshot.classStanding}</dd>
+                </div>
+              </dl>
             </div>
           </div>
         </section>
@@ -2722,7 +3464,7 @@ function App() {
         <section className="settings-section settings-section--wide">
           <h2 className="settings-page-title">Settings</h2>
           <div className="settings-page-grid">
-            <div className="settings-page-grid__col settings-page-grid__col--controls">
+            <div className="settings-page-grid__col settings-page-grid__col--controls" data-tour="settings-controls">
               <label className="toggle-row">
                 <input
                   type="checkbox"
@@ -2782,29 +3524,6 @@ function App() {
                   </div>
                 </div>
               </details>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.trackSessionStats}
-                  onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, trackSessionStats: event.target.checked }))
-                  }
-                />
-                Show in-app session activity counts (this visit)
-              </label>
-              <p className="muted settings-hint">
-                In-memory only; resets on refresh. A lightweight stand-in for analytics — not sent anywhere.
-              </p>
-              {settings.trackSessionStats && (
-                <ul className="session-stats" aria-label="This visit activity">
-                  <li>Filter clears: {sessionStatsRef.current.filterClears}</li>
-                  <li>Filter preset uses: {sessionStatsRef.current.filterPresets}</li>
-                  <li>Successful enroll add clicks: {sessionStatsRef.current.enrollSuccess}</li>
-                  <li>“Import plan to enrollment” runs: {sessionStatsRef.current.planImports}</li>
-                  <li>Plan JSON exports: {sessionStatsRef.current.planExportDownloads}</li>
-                  <li>Plan JSON imports: {sessionStatsRef.current.planImportUploads}</li>
-                </ul>
-              )}
               <details className="settings-advanced">
                 <summary>Alerts and accessibility (show more)</summary>
                 <div className="settings-advanced__body">
@@ -2846,7 +3565,7 @@ function App() {
                     />
                     Reduce interface motion (also respects your system’s “reduced motion” when set to off)
                   </label>
-                  <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
+                  <p className="muted settings-hint">
                     When the OS already requests reduced motion, the calmer experience applies even with this unset.
                   </p>
                   <label className="toggle-row">
@@ -2857,16 +3576,15 @@ function App() {
                         setSettings((prev) => ({ ...prev, highContrast: event.target.checked }))
                       }
                     />
-                    High-contrast theme
+                    Dark Mode/High Contrast
                   </label>
                   <p className="muted settings-hint">
-                    Dark background and bright text for low vision, glare, or a dim room. You can also zoom the browser;
-                    we keep controls keyboard-accessible.
+                    Low-light and accessibility theme with stronger surface separation and readable text.
                   </p>
                 </div>
               </details>
             </div>
-            <div className="settings-page-grid__col settings-page-grid__col--help">
+            <div className="settings-page-grid__col settings-page-grid__col--help" data-tour="settings-help">
               <h3 className="settings-help-heading">Keyboard and tips</h3>
               <p className="muted settings-help-lead">Keyboard shortcuts and quick tips for the prototype.</p>
               <div className="settings-help-box">
@@ -3096,6 +3814,12 @@ function App() {
                 <button
                   className="btn btn--primary"
                   type="button"
+                  disabled={getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0}
+                  title={
+                    getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0
+                      ? `Missing prerequisites: ${formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}`
+                      : undefined
+                  }
                   onClick={() => {
                     const c = selectedCourse
                     const r = addCourseToEnrollment(c)
@@ -3124,6 +3848,19 @@ function App() {
             <div className="course-detail__section">
               <h4 className="course-detail__label">Description</h4>
               <p className="course-detail__value">{selectedCourse.description}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Suggested years</h4>
+              <p className="course-detail__value">{formatSuggestedYears(selectedCourse.suggestedYears)}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Prerequisites</h4>
+              <p className="course-detail__value">{formatPrerequisiteList(selectedCourse.prerequisites, courseMap)}</p>
+              {getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0 && (
+                <p className="muted course-detail__fine">
+                  Missing for enrollment: {formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}
+                </p>
+              )}
             </div>
             <div className="course-detail__section">
               <h4 className="course-detail__label">Syllabus</h4>
