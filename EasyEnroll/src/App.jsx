@@ -28,6 +28,12 @@ import {
   getYearAwareRecommendations,
 } from "./utils/degreeProgress"
 import {
+  formatMissingPrerequisites,
+  formatPrerequisiteList,
+  formatSuggestedYears,
+  getMissingPrerequisiteIds,
+} from "./utils/prerequisites"
+import {
   clearAuthSession,
   loadAuthSession,
   loadUserBucket,
@@ -408,6 +414,7 @@ function formatCourseMeta(course) {
 
 function CourseCard({
   course,
+  courseMap,
   degreeLabels,
   onOpen,
   onAdd,
@@ -418,6 +425,9 @@ function CourseCard({
   actionTitle,
   compact = false,
 }) {
+  const suggestedYearsText = formatSuggestedYears(course.suggestedYears)
+  const prerequisiteText = formatPrerequisiteList(course.prerequisites, courseMap)
+
   return (
     <article
       className={`course-card${compact ? " course-card--compact" : ""}`}
@@ -448,6 +458,8 @@ function CourseCard({
       </header>
       <p className="course-card__title">{course.title}</p>
       <p className="course-card__meta">{formatCourseMeta(course)}</p>
+      <p className="course-card__meta">Suggested years: {suggestedYearsText}</p>
+      <p className="course-card__meta">Prereqs: {prerequisiteText}</p>
       {!compact && (
         <>
           <p className="course-card__meta">Class Time: {meetingLabel(course.meetingTimes)}</p>
@@ -483,7 +495,6 @@ function CourseCard({
     </article>
   )
 }
-
 function PlanningConflictCard({ conflict, courses }) {
   if (conflict.type === "course") {
     const ca = courses.find((c) => c.id === conflict.a)
@@ -1320,6 +1331,16 @@ function App() {
     [enrolledIds],
   )
 
+  const courseMap = useMemo(() => {
+    if (!courses || courses.length === 0) return new Map()
+    return new Map(courses.map((course) => [course.id, course]))
+  }, [courses])
+
+  const enrolledCompletionIds = useMemo(() => {
+    if (!enrolledIds || enrolledIds.length === 0) return new Set()
+    return new Set(enrolledIds)
+  }, [enrolledIds])
+
   const enrolledCredits = useMemo(
     () => enrolledCourses.reduce((sum, course) => sum + course.credits, 0),
     [enrolledCourses],
@@ -1377,6 +1398,19 @@ function App() {
     () => plans.find((plan) => plan.id === activePlanId) || null,
     [plans, activePlanId],
   )
+
+  const planningCompletionIds = useMemo(() => {
+    if (!enrolledIds) {
+      return new Set()
+    }
+    const ids = new Set(enrolledIds)
+    if (activePlan) {
+      for (const courseId of activePlan.courseIds) {
+        ids.add(courseId)
+      }
+    }
+    return ids
+  }, [enrolledIds, activePlan])
 
   useEffect(() => {
     if (plans.length === 0) {
@@ -1584,6 +1618,15 @@ function App() {
       return { added: false, reason: "duplicate" }
     }
 
+    const missingPrereqs = getMissingPrerequisiteIds(course, enrolledCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)} before you can enroll.`,
+      )
+      return { added: false, reason: "prerequisites" }
+    }
+
     if (course.seatsAvailable === 0 && !course.waitlistOpen) {
       pushToast("error", `${course.id} has no open seats and the waitlist is closed.`)
       return { added: false, reason: "seat_rule" }
@@ -1739,6 +1782,15 @@ function App() {
       return
     }
 
+    const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
+    if (missingPrereqs.length > 0) {
+      pushToast(
+        "error",
+        `${course.id} needs ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)} before it can be added to this plan.`,
+      )
+      return
+    }
+
     const other = plannedCourses
     const classHit = hasCourseConflict(course, other)
     const evHits = getEventConflicts(course, events)
@@ -1814,6 +1866,7 @@ function App() {
       }
 
       const duplicate = workingIds.includes(course.id)
+      const missingPrereqs = getMissingPrerequisiteIds(course, workingIds)
       const seatBlocked = course.seatsAvailable === 0 && !course.waitlistOpen
       const creditBlocked = workingCredits + course.credits > MAX_CREDITS
       const classConflict = hasCourseConflict(
@@ -1822,9 +1875,11 @@ function App() {
       )
       const eventConflict = getEventConflicts(course, events).length > 0
 
-      if (duplicate || seatBlocked || creditBlocked || classConflict || eventConflict) {
+      if (duplicate || missingPrereqs.length > 0 || seatBlocked || creditBlocked || classConflict || eventConflict) {
         const reason = duplicate
           ? "Already enrolled"
+          : missingPrereqs.length > 0
+            ? `Missing prerequisites: ${formatMissingPrerequisites(course, workingIds, courseMap)}`
           : seatBlocked
             ? "Seat / waitlist unavailable"
             : creditBlocked
@@ -2367,12 +2422,19 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={addCourseToEnrollment}
                     addLabel="Add"
                     compact={settings.compactCatalog}
                     draggable
+                    actionDisabled={getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0}
+                    actionTitle={
+                      getMissingPrerequisiteIds(course, enrolledCompletionIds).length > 0
+                        ? `Missing prerequisites: ${formatMissingPrerequisites(course, enrolledCompletionIds, courseMap)}`
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -2391,6 +2453,7 @@ function App() {
                   <CourseCard
                     key={course.id}
                     course={course}
+                    courseMap={courseMap}
                     degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                     onOpen={setSelectedCourse}
                     onAdd={removeEnrolledCourse}
@@ -2948,19 +3011,23 @@ function App() {
                       const blockedByCap = Boolean(
                         activePlan && !inPlan && plannedCredits + course.credits > MAX_CREDITS,
                       )
+                      const missingPrereqs = getMissingPrerequisiteIds(course, planningCompletionIds)
                       return (
                         <CourseCard
                           key={`${course.id}-planner`}
                           course={course}
+                          courseMap={courseMap}
                           degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                           onOpen={setSelectedCourse}
                           onAdd={addToPlan}
                           addLabel="Add to plan"
                           compact={settings.compactCatalog}
                           actionVariant="secondary"
-                          actionDisabled={!activePlan || inPlan || blockedByCap}
+                          actionDisabled={!activePlan || inPlan || blockedByCap || missingPrereqs.length > 0}
                           actionTitle={
-                            blockedByCap
+                            missingPrereqs.length > 0
+                              ? `Missing prerequisites: ${formatMissingPrerequisites(course, planningCompletionIds, courseMap)}`
+                              : blockedByCap
                               ? PLANNING_CREDIT_CAP_MESSAGE
                               : !activePlan
                                 ? "Select or create a plan first."
@@ -2996,6 +3063,7 @@ function App() {
                       <CourseCard
                         key={`${course.id}-planned`}
                         course={course}
+                        courseMap={courseMap}
                         degreeLabels={getCourseDegreeMatches(course.id, currentUser.programs)}
                         onOpen={setSelectedCourse}
                         onAdd={() => removeFromPlan(course.id)}
@@ -3746,6 +3814,12 @@ function App() {
                 <button
                   className="btn btn--primary"
                   type="button"
+                  disabled={getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0}
+                  title={
+                    getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0
+                      ? `Missing prerequisites: ${formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}`
+                      : undefined
+                  }
                   onClick={() => {
                     const c = selectedCourse
                     const r = addCourseToEnrollment(c)
@@ -3774,6 +3848,19 @@ function App() {
             <div className="course-detail__section">
               <h4 className="course-detail__label">Description</h4>
               <p className="course-detail__value">{selectedCourse.description}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Suggested years</h4>
+              <p className="course-detail__value">{formatSuggestedYears(selectedCourse.suggestedYears)}</p>
+            </div>
+            <div className="course-detail__section">
+              <h4 className="course-detail__label">Prerequisites</h4>
+              <p className="course-detail__value">{formatPrerequisiteList(selectedCourse.prerequisites, courseMap)}</p>
+              {getMissingPrerequisiteIds(selectedCourse, enrolledCompletionIds).length > 0 && (
+                <p className="muted course-detail__fine">
+                  Missing for enrollment: {formatMissingPrerequisites(selectedCourse, enrolledCompletionIds, courseMap)}
+                </p>
+              )}
             </div>
             <div className="course-detail__section">
               <h4 className="course-detail__label">Syllabus</h4>

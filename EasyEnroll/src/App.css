@@ -1478,11 +1478,14 @@ html.high-contrast .import-summary__table thead th {
 }
 
 .modal {
-	width: min(680px, 96vw);
+	width: min(640px, 84vw);
+	max-height: min(76vh, 660px);
 	border-radius: 14px;
 	background: var(--bg-panel);
 	border: 1px solid var(--border);
 	box-shadow: var(--shadow);
+	display: flex;
+	flex-direction: column;
 	overflow: hidden;
 }
 
@@ -1492,18 +1495,23 @@ html.high-contrast .import-summary__table thead th {
 	justify-content: space-between;
 	align-items: center;
 	gap: 0.5rem;
-	padding: 0.7rem 0.85rem;
+	padding: 0.6rem 0.75rem;
 	border-bottom: 1px solid #e4f0e7;
+	flex-shrink: 0;
 }
 
 .modal__actions {
 	border-bottom: none;
 	border-top: 1px solid #e4f0e7;
 	justify-content: flex-end;
+	flex-wrap: wrap;
 }
 
 .modal__body {
-	padding: 0.8rem;
+	padding: 0.65rem;
+	overflow-y: auto;
+	flex: 1;
+	min-height: 0;
 }
 
 .tour-overlay {
@@ -1637,6 +1645,16 @@ html.high-contrast .import-summary__table thead th {
 	gap: 0.3rem;
 	font-size: 0.9rem;
 	color: var(--muted);
+}
+
+@media (prefers-contrast: more) {
+	.tour-intro {
+		background: var(--bg-panel);
+	}
+
+	.tour-intro__list {
+		color: var(--text-primary);
+	}
 }
 
 @media (max-width: 1050px) {

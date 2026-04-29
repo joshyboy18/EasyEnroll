@@ -70,6 +70,7 @@ html.high-contrast {
   --danger: #ff8a7a;
   --border: #2d3d32;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --surface-soft: #151b16;
   /* Nested panels / cards (must pair with var(--text), not hardcoded light grays) */
   --surface-inset: #1a211c;
   --surface-muted: #1e2620;
