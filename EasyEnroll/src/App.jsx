@@ -643,8 +643,11 @@ function Modal({ title, children, onClose, actions }) {
 
 function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
   const [targetRect, setTargetRect] = useState(null)
-  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, placement: "center" })
-  const [isTargetSettled, setIsTargetSettled] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState(() => ({
+    top: typeof window !== "undefined" ? Math.max(80, window.innerHeight * 0.28) : 80,
+    left: typeof window !== "undefined" ? Math.max(24, window.innerWidth * 0.5 - 160) : 24,
+    placement: "center",
+  }))
   const tooltipRef = useRef(null)
 
   useEffect(() => {
@@ -671,18 +674,13 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
     }
 
     const setRectIfChanged = (nextRect) => {
+      if (!nextRect || nextRect.width < 6 || nextRect.height < 6) {
+        return
+      }
       setTargetRect((prev) => {
-        const next = rectChanged(prev, nextRect) ? nextRect : prev
-        if (next !== prev) {
-          setIsTargetSettled(false)
-          window.clearTimeout(settleTimer)
-          settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
-        }
-        return next
+        return rectChanged(prev, nextRect) ? nextRect : prev
       })
     }
-
-    let settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
 
     const bindTarget = (target) => {
       activeTarget = target
@@ -694,7 +692,8 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       }
       update()
       if (typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" })
+        // Use instant scroll for tour targeting so overlay moves once to final position.
+        target.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
       }
       window.addEventListener("resize", update)
       window.addEventListener("scroll", update, true)
@@ -727,7 +726,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
         return
       }
       if (performance.now() - startedAt > 1400) {
-        setTargetRect(null)
         return
       }
       rafId = window.requestAnimationFrame(pollForTarget)
@@ -746,7 +744,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       if (rafId) {
         window.cancelAnimationFrame(rafId)
       }
-      window.clearTimeout(settleTimer)
       if (observer) {
         observer.disconnect()
       }
@@ -760,11 +757,6 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
       return
     }
     if (!targetRect) {
-      setTooltipPos({
-        top: Math.max(80, window.innerHeight * 0.28),
-        left: Math.max(24, window.innerWidth * 0.5 - 160),
-        placement: "center",
-      })
       return
     }
     const tooltipRect = tooltip.getBoundingClientRect()
@@ -839,7 +831,7 @@ function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
   const progress = totalSteps > 0 ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0
-  const spotlightRect = targetRect && isTargetSettled
+  const spotlightRect = targetRect
     ? {
         top: Math.max(0, targetRect.top - 8),
         left: Math.max(0, targetRect.left - 8),
@@ -2107,7 +2099,7 @@ function App() {
       return
     }
     calendarPopoutSourceRef.current = source
-    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=800")
+    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=650")
     if (!popup) {
       pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
       return
