@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
+import easyEnrollLoginLogo from "../EasyEnroll.png"
+import easyEnrollLogoIcon from "../EasyEnrollIcon.png"
+import easyEnrollLogoText from "../EasyEnrollText.png"
 import { TimeGridCalendar } from "./components/TimeGridCalendar.jsx"
 import { useToast } from "./components/ToastStack.jsx"
 import { loginWithSso } from "./utils/auth"
@@ -22,7 +25,6 @@ import {
 } from "./utils/conflicts"
 import {
   getCourseDegreeMatches,
-  getProgramNames,
   getYearAwareRecommendations,
 } from "./utils/degreeProgress"
 import {
@@ -97,8 +99,6 @@ const defaultSettings = {
   highContrast: false,
   /** Tighter course cards in catalog lists. */
   compactCatalog: false,
-  /** In-memory only: count UI actions and show in Settings. */
-  trackSessionStats: true,
 }
 
 function mergeSettingsWithDefaults(stored) {
@@ -132,6 +132,136 @@ function normalizeEventEntry(event) {
 function defaultProfileFromUser(user) {
   const local = user.email.split("@")[0] || "student"
   return { name: user.name, emailLocal: local, avatarDataUrl: "" }
+}
+
+function getNextSemesterLabel(termLabel) {
+  const match = String(termLabel).match(/^(Spring|Fall)\s+(\d{4})$/i)
+  if (!match) {
+    return "Next semester"
+  }
+
+  const season = match[1].toLowerCase()
+  const year = Number(match[2])
+  if (season === "spring") {
+    return `Fall ${year}`
+  }
+  if (season === "fall") {
+    return `Spring ${year + 1}`
+  }
+  return "Next semester"
+}
+
+function getClassStandingLabel(classYear) {
+  const standings = ["Freshman", "Sophomore", "Junior", "Senior"]
+  const index = Math.min(Math.max(Number(classYear) || 1, 1), standings.length) - 1
+  return standings[index]
+}
+
+function getRegistrationSnapshot(classYear) {
+  const earnedHoursByClassYear = {
+    1: { institutional: 15, transfer: 0 },
+    2: { institutional: 42, transfer: 3 },
+    3: { institutional: 60, transfer: 12 },
+    4: { institutional: 75, transfer: 20 },
+  }
+  const earnedHours = earnedHoursByClassYear[classYear] ?? earnedHoursByClassYear[1]
+
+  return {
+    termLabel: getNextSemesterLabel(ENROLLMENT_TERM_LABEL),
+    studentStatus: "Permits registration",
+    academicStatus: "Good Academic Standing permits registration",
+    holds: "No holds on record",
+    earnedHours: `${earnedHours.institutional} institutional hours, ${earnedHours.transfer} transfer hours`,
+    classStanding: getClassStandingLabel(classYear),
+  }
+}
+
+function getStudentInformationSnapshot(user) {
+  // 1. Level Calculation
+  const levelByClassYear = {
+    1: "Freshman",
+    2: "Sophomore",
+    3: "Junior",
+    4: "Senior",
+  };
+  const level = levelByClassYear[user.classYear] ?? "Undergraduate";
+
+  // 2. Academic Mapping (Major, Dept, Degree, Specific College)
+  // We can easily add more programs to this dictionary as the app grows.
+  const programDirectory = {
+    "bs-cs": {
+      major: "Computer Science",
+      department: "Computer Science",
+      degree: "Bachelor of Science",
+      college: "Gallogly College of Engineering"
+    },
+    "bs-bio": {
+      major: "Biology",
+      department: "Biological Sciences",
+      degree: "Bachelor of Science",
+      college: "College of Science"
+    },
+    "ba-eng": {
+      major: "English",
+      department: "English Literature",
+      degree: "Bachelor of Arts",
+      college: "College of Arts and Sciences"
+    }
+  };
+
+  // Find the primary major (ignoring minors) from the user's programs
+  const primaryProgramId = user.programs.find(p => !p.startsWith('minor-')) || user.programs[0];
+  
+  // Fallback data just in case a user has a program not in our directory
+  const academicData = programDirectory[primaryProgramId] || {
+    major: "Undeclared",
+    department: "General Counseling",
+    degree: "Undergraduate Degree",
+    college: "University College"
+  };
+
+  // 3. College Logic (General College for Year 1, Specific College for Year 2+)
+  const assignedCollege = user.classYear < 2 ? "General College" : academicData.college;
+
+  // 4. Admit Term and Type Logic
+  // We calculate the base fall entry year by subtracting class year from the current year (2026)
+  const baseAdmitYear = 2026 - user.classYear;
+  let admitTerm, admitType;
+
+  switch (user.admitProfile) {
+    case "direct-spring":
+      admitTerm = `Spring ${baseAdmitYear + 1}`;
+      admitType = "Spring Admit - Direct Entry";
+      break;
+    case "delayed-semester":
+      admitTerm = `Spring ${baseAdmitYear + 1}`;
+      admitType = "Delayed Entry - 1 Semester";
+      break;
+    case "delayed-year":
+      // They started in the Fall, but they were delayed by a year+ after high school
+      admitTerm = `Fall ${baseAdmitYear}`;
+      admitType = "Delayed Entry - 1+ Years";
+      break;
+    case "direct-fall":
+    default:
+      admitTerm = `Fall ${baseAdmitYear}`;
+      admitType = "Direct From High School";
+      break;
+  }
+
+  // 5. Return the dynamic snapshot
+  return {
+    level: level,
+    college: assignedCollege,
+    degree: academicData.degree,
+    program: academicData.degree, // Or map this uniquely if 'Program' differs from 'Degree'
+    campus: "Main Campus", // Can be hardcoded unless you have multiple campuses
+    catalogTerm: admitTerm, // Usually matches the term they were admitted
+    admitTerm: admitTerm,
+    admitType: admitType,
+    major: academicData.major,
+    department: academicData.department,
+  };
 }
 
 function formatCourseMeta(course) {
@@ -377,7 +507,7 @@ function LoginPage({
   return (
     <main className="login-page">
       <section className="login-card">
-        <h1>Easy Enroll</h1>
+        <img className="login-logo" src={easyEnrollLoginLogo} alt="Easy Enroll" />
         <p>Choose your SSO identity to access your enrollment dashboard and saved plans.</p>
         <label>
           SSO Identity
@@ -500,24 +630,6 @@ function App() {
   /** @type {React.MutableRefObject<"enrollment" | "planning">} */
   const calendarPopoutSourceRef = useRef("enrollment")
   const keyboardLayerRef = useRef({})
-  const sessionStatsRef = useRef({
-    filterClears: 0,
-    filterPresets: 0,
-    enrollSuccess: 0,
-    planImports: 0,
-    planExportDownloads: 0,
-    planImportUploads: 0,
-  })
-  const [, setSessionStatsRender] = useState(0)
-  const bumpSession = useCallback(
-    (key) => {
-      sessionStatsRef.current[key] += 1
-      if (settings.trackSessionStats) {
-        setSessionStatsRender((n) => n + 1)
-      }
-    },
-    [settings.trackSessionStats],
-  )
 
   const currentUser = useMemo(
     () => mockUsers.find((entry) => entry.id === session?.userId) || null,
@@ -525,6 +637,18 @@ function App() {
   )
 
   const classYear = currentUser?.classYear ?? 1
+  const registrationSnapshot = useMemo(
+    () => getRegistrationSnapshot(classYear),
+    [classYear],
+  )
+
+  const studentInformationSnapshot = useMemo(() => {
+    // If nobody is logged in yet, return an empty object to prevent a crash
+    if (!currentUser) {
+      return {}; 
+    }
+    return getStudentInformationSnapshot(currentUser);
+  }, [currentUser]);
 
   const planningTermOption = useMemo(
     () => getPlanningTermOption(planningContext.targetTermId),
@@ -881,7 +1005,6 @@ function App() {
   }, [plansDirty, activeView])
 
   const clearFilters = () => {
-    bumpSession("filterClears")
     setSearchText("")
     setDepartmentFilter("All")
     setSeatFilter("all")
@@ -893,7 +1016,6 @@ function App() {
       clearFilters()
       return
     }
-    bumpSession("filterPresets")
     if (preset === "open") {
       setSeatFilter("open")
       setProgramOnly(false)
@@ -1019,7 +1141,6 @@ function App() {
     }
 
     setEnrolledIds((prev) => [...prev, course.id])
-    bumpSession("enrollSuccess")
     pushToast("success", `${course.id} was added to your enrollment.`, {
       label: "View week calendar",
       onAction: () => setActiveView("dashboard"),
@@ -1243,7 +1364,6 @@ function App() {
     }
 
     setEnrolledIds(workingIds)
-    bumpSession("planImports")
 
     if (addedCount > 0) {
       pushToast(
@@ -1278,7 +1398,6 @@ function App() {
     a.download = "easyenroll-plans.json"
     a.click()
     URL.revokeObjectURL(url)
-    bumpSession("planExportDownloads")
     pushToast("success", "Downloaded a JSON backup of your plans.")
   }
 
@@ -1305,7 +1424,6 @@ function App() {
         if (currentUser) {
           saveUserBucket(currentUser.id, "plans", data)
         }
-        bumpSession("planImportUploads")
         pushToast("success", "Imported plans from JSON. Your previous in-browser plan list was replaced.")
       } catch {
         pushToast("error", "That file is not valid Easy Enroll plan JSON.")
@@ -1481,14 +1599,16 @@ function App() {
       />
     )
   }
-
   return (
     <>
       <a className="skip-link" href="#page-main">
         Skip to main content
       </a>
       <header className="app-topbar">
-      <h1>Easy Enroll</h1>
+      <div className="app-logo" aria-label="Easy Enroll">
+        <img className="app-logo__icon" src={easyEnrollLogoIcon} alt="" aria-hidden="true" />
+        <img className="app-logo__text" src={easyEnrollLogoText} alt="Easy Enroll" />
+      </div>
       <nav className="nav-row">
         <button
           className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
@@ -2608,111 +2728,102 @@ function App() {
 
       {activeView === "profile" && (
         <section className="profile-section">
-          <h2>Profile</h2>
-          <p>Identity fields follow university policy.</p>
+          <h2>Student Profile</h2>
           <div className="profile-wide-card">
-            <div className="profile-group" aria-labelledby="profile-group-photo-heading">
-              <h3 className="profile-group__title" id="profile-group-photo-heading">
-                Photo
-              </h3>
-              <div className="profile-avatar-block">
-                {profile.avatarDataUrl ? (
-                  <img src={profile.avatarDataUrl} alt="" className="profile-avatar" width={96} height={96} />
-                ) : (
-                  <div className="profile-avatar profile-avatar--ph" aria-hidden>
-                    {(profile.name || currentUser.name)
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase()}
-                  </div>
-                )}
-                <label className="profile-file">
-                  Update photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(ev) => {
-                      const f = ev.target.files?.[0]
-                      if (!f) {
-                        return
-                      }
-                      const r = new FileReader()
-                      r.onload = () => {
-                        setProfile((prev) => ({ ...prev, avatarDataUrl: r.result }))
-                        pushToast("success", "Profile picture updated (stored locally in this browser).")
-                      }
-                      r.readAsDataURL(f)
-                    }}
-                  />
-                </label>
-              </div>
-            </div>
-
             <div className="profile-group profile-group--locked" aria-labelledby="profile-group-identity-heading">
-              <h3 className="profile-group__title" id="profile-group-identity-heading">
-                Identity (read-only)
-              </h3>
-              <p className="muted profile-group__lead">
-                Public / legal identity can’t be changed here — requests go through the university.
-              </p>
               <div className="profile-locked">
                 <p>
-                  <strong>Display name (read-only):</strong> {profile.name || currentUser.name}
+                  <strong>Student name:</strong> {profile.name || currentUser.name}
                 </p>
-                  <p>
-                    <strong>Programs: </strong> {getProgramNames(currentUser.programs).join("; ")}
-                  </p>
-                <p className="muted">Legal name and password are managed by the university directory.</p>
-                <div className="profile-request-row">
-                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "name" })}>
-                    Request name change
-                  </button>
-                  <button className="btn btn--subtle" type="button" onClick={() => setUniRequest({ type: "password" })}>
-                    Request password change
-                  </button>
-                </div>
+                <p>
+                  <strong> School Email:  </strong> {(profile.emailLocal || "username").trim()}{SCHOOL_EMAIL_DOMAIN}
+                </p>
               </div>
             </div>
+          </div>
 
-            <div className="profile-group" aria-labelledby="profile-group-contact-heading">
-              <h3 className="profile-group__title" id="profile-group-contact-heading">
-                School email
+          <div className="profile-wide-card profile-information-card" aria-labelledby="profile-information-heading">
+            <div className="profile-group profile-group--information">
+              <h3 id="profile-information-heading" className="profile-group__title">
+                Student Information
               </h3>
-              <p className="muted profile-group__lead">
-                How a classmate or instructor might see your campus address. “Public preview” = this email line only — no
-                live directory.
-              </p>
-              <div className="profile-public-preview" aria-label="Public email preview">
-                <span className="muted">Preview:</span>{" "}
-                <strong>
-                  {(profile.emailLocal || "username").trim() || "username"}
-                  {SCHOOL_EMAIL_DOMAIN}
-                </strong>
-              </div>
-              <label>
-                Edit local part
-                <div className="email-split">
-                  <input
-                    value={profile.emailLocal}
-                    onChange={(event) => {
-                      const t = event.target.value.replace(/[^a-zA-Z0-9._-]/g, "")
-                      setProfile((prev) => ({ ...prev, emailLocal: t }))
-                    }}
-                    type="text"
-                    autoComplete="off"
-                    placeholder="username"
-                    aria-label="Email local part (before @)"
-                  />
-                  <span className="email-split__domain" aria-hidden>
-                    {SCHOOL_EMAIL_DOMAIN}
-                  </span>
+              <dl className="profile-information-grid">
+                <div className="profile-information-item">
+                  <dt>Level</dt>
+                  <dd>{studentInformationSnapshot.level}</dd>
                 </div>
-                <span className="muted" style={{ fontSize: "0.85rem" }}>
-                  You may edit only the part before @; the domain is fixed for university routing.
-                </span>
-              </label>
+                <div className="profile-information-item">
+                  <dt>College</dt>
+                  <dd>{studentInformationSnapshot.college}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Degree</dt>
+                  <dd>{studentInformationSnapshot.degree}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Program</dt>
+                  <dd>{studentInformationSnapshot.program}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Campus</dt>
+                  <dd>{studentInformationSnapshot.campus}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Catalog Term</dt>
+                  <dd>{studentInformationSnapshot.catalogTerm}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Admit Term</dt>
+                  <dd>{studentInformationSnapshot.admitTerm}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Admit Type</dt>
+                  <dd>{studentInformationSnapshot.admitType}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Major</dt>
+                  <dd>{studentInformationSnapshot.major}</dd>
+                </div>
+                <div className="profile-information-item">
+                  <dt>Department</dt>
+                  <dd>{studentInformationSnapshot.department}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <div className="profile-wide-card profile-registration-card" aria-labelledby="profile-registration-heading">
+            <div className="profile-group profile-group--registration">
+              <h3 id="profile-registration-heading" className="profile-group__title">
+                Registration Information
+              </h3>
+              <p></p>
+              <dl className="profile-registration-grid">
+                <div className="profile-registration-item">
+                  <dt>Semester</dt>
+                  <dd>{registrationSnapshot.termLabel}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Student status</dt>
+                  <dd>{registrationSnapshot.studentStatus}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Academic status</dt>
+                  <dd>{registrationSnapshot.academicStatus}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Student holds</dt>
+                  <dd>{registrationSnapshot.holds}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Earned hours</dt>
+                  <dd>{registrationSnapshot.earnedHours}</dd>
+                </div>
+                <div className="profile-registration-item">
+                  <dt>Class standing</dt>
+                  <dd>{registrationSnapshot.classStanding}</dd>
+                </div>
+              </dl>
             </div>
           </div>
         </section>
@@ -2782,29 +2893,6 @@ function App() {
                   </div>
                 </div>
               </details>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.trackSessionStats}
-                  onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, trackSessionStats: event.target.checked }))
-                  }
-                />
-                Show in-app session activity counts (this visit)
-              </label>
-              <p className="muted settings-hint">
-                In-memory only; resets on refresh. A lightweight stand-in for analytics — not sent anywhere.
-              </p>
-              {settings.trackSessionStats && (
-                <ul className="session-stats" aria-label="This visit activity">
-                  <li>Filter clears: {sessionStatsRef.current.filterClears}</li>
-                  <li>Filter preset uses: {sessionStatsRef.current.filterPresets}</li>
-                  <li>Successful enroll add clicks: {sessionStatsRef.current.enrollSuccess}</li>
-                  <li>“Import plan to enrollment” runs: {sessionStatsRef.current.planImports}</li>
-                  <li>Plan JSON exports: {sessionStatsRef.current.planExportDownloads}</li>
-                  <li>Plan JSON imports: {sessionStatsRef.current.planImportUploads}</li>
-                </ul>
-              )}
               <details className="settings-advanced">
                 <summary>Alerts and accessibility (show more)</summary>
                 <div className="settings-advanced__body">
@@ -2857,11 +2945,10 @@ function App() {
                         setSettings((prev) => ({ ...prev, highContrast: event.target.checked }))
                       }
                     />
-                    High-contrast theme
+                    Dark Mode/High Contrast
                   </label>
                   <p className="muted settings-hint">
-                    Dark background and bright text for low vision, glare, or a dim room. You can also zoom the browser;
-                    we keep controls keyboard-accessible.
+                    Low-light and accessibility theme with stronger surface separation and readable text.
                   </p>
                 </div>
               </details>

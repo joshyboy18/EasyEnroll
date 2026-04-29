@@ -250,7 +250,6 @@ Potential features for future phases:
 - [ ] Prerequisite enforcement
 - [ ] Semester GPA calculator
 - [ ] Export to PDF
-- [ ] Dark mode theme
 - [ ] Multi-language support
 
 ## Troubleshooting
