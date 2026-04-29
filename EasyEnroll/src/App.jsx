@@ -51,10 +51,126 @@ const VIEW_WAYFINDING = {
   settings: "Settings — display, alerts, and accessibility for the planner.",
 }
 
+const APP_TOUR_STEPS = [
+  {
+    id: "nav",
+    view: "dashboard",
+    title: "Navigate the workspace",
+    body: "Use Enrollment, Planning, Profile, and Settings to jump between the main areas of Easy Enroll.",
+    target: '[data-tour="nav"]',
+    placement: "bottom",
+  },
+  {
+    id: "recommended",
+    view: "dashboard",
+    title: "Start with recommendations",
+    body: "These are year-aware suggestions that help you build a good first schedule quickly.",
+    target: '[data-tour="recommended"]',
+    placement: "bottom",
+  },
+  {
+    id: "search",
+    view: "dashboard",
+    title: "Filter the catalog",
+    body: "Search by course, department, or seat status to narrow down the list fast.",
+    target: '[data-tour="search"]',
+    placement: "bottom",
+  },
+  {
+    id: "available",
+    view: "dashboard",
+    title: "Pick available courses",
+    body: "Click a card for details or drag it into Enrolled Courses to build your term.",
+    target: '[data-tour="available-header"]',
+    placement: "right",
+  },
+  {
+    id: "enrolled",
+    view: "dashboard",
+    title: "Review enrolled courses",
+    body: "This is your current schedule. Remove items or confirm credit totals here.",
+    target: '[data-tour="enrolled-header"]',
+    placement: "left",
+  },
+  {
+    id: "calendar",
+    view: "dashboard",
+    title: "Check your weekly calendar",
+    body: "Use the calendar to confirm timing, avoid overlaps, and export a schedule file.",
+    target: '[data-tour="calendar-header"]',
+    placement: "bottom",
+  },
+  {
+    id: "planning-term",
+    view: "planning",
+    title: "Choose a planning term",
+    body: "Pick a target term for your what-if schedule drafts before importing anything to enrollment.",
+    target: '[data-tour="planning-term"]',
+    placement: "bottom",
+  },
+  {
+    id: "planning-search",
+    view: "planning",
+    title: "Build plan options",
+    body: "Use the same filters to add courses into a plan and compare alternatives before committing.",
+    target: '[data-tour="planning-search"]',
+    placement: "bottom",
+  },
+  {
+    id: "profile-info",
+    view: "profile",
+    title: "Review your profile snapshot",
+    body: "Profile shows your student information and registration context in one place.",
+    target: '[data-tour="profile-info"]',
+    placement: "top",
+  },
+  {
+    id: "profile-registration",
+    view: "profile",
+    title: "Check registration status",
+    body: "Use these values to confirm holds, standing, earned hours, and registration readiness.",
+    target: '[data-tour="profile-registration"]',
+    placement: "top",
+  },
+  {
+    id: "settings-controls",
+    view: "settings",
+    title: "Adjust planner behavior",
+    body: "Settings lets you tune calendar focus, catalog density, accessibility, and alerts.",
+    target: '[data-tour="settings-controls"]',
+    placement: "right",
+  },
+  {
+    id: "settings-help",
+    view: "settings",
+    title: "Use keyboard tips",
+    body: "This panel provides quick operational tips and keyboard guidance while you work.",
+    target: '[data-tour="settings-help"]',
+    placement: "left",
+  },
+]
+
 const LS_ONBOARD_ENROLLMENT = "easyenroll.dismissOnboarding.enrollment"
 const LS_ONBOARD_PLANNING = "easyenroll.dismissOnboarding.planning"
 /** @deprecated kept in sync when enrollment onboarding is dismissed */
 const LS_DISMISS_WELCOME_LEGACY = "easyenroll.dismissWelcome"
+const LS_TOUR_ENROLLMENT = "easyenroll.tour.enrollment"
+const LS_TOUR_WELCOME = "easyenroll.tour.welcome"
+
+function readLocalFlag(key) {
+  if (typeof localStorage === "undefined") {
+    return false
+  }
+  return localStorage.getItem(key) === "1"
+}
+
+function writeLocalFlag(key) {
+  try {
+    localStorage.setItem(key, "1")
+  } catch {
+    /* ignore */
+  }
+}
 
 function enrollmentOnboardingInitiallyDismissed() {
   if (typeof localStorage === "undefined") {
@@ -85,6 +201,22 @@ function persistPlanningOnboardingDismissed() {
   } catch {
     /* ignore */
   }
+}
+
+function enrollmentTourInitiallyCompleted() {
+  return readLocalFlag(LS_TOUR_ENROLLMENT)
+}
+
+function persistEnrollmentTourCompleted() {
+  writeLocalFlag(LS_TOUR_ENROLLMENT)
+}
+
+function tourWelcomeInitiallyDismissed() {
+  return readLocalFlag(LS_TOUR_WELCOME)
+}
+
+function persistTourWelcomeDismissed() {
+  writeLocalFlag(LS_TOUR_WELCOME)
 }
 
 const EVENT_COLOR_PRESETS = ["#b8e1ff", "#ffd6e8", "#d8f3dc", "#ffe8b6", "#e2d4ff", "#cfeff7"]
@@ -498,6 +630,278 @@ function Modal({ title, children, onClose, actions }) {
   )
 }
 
+function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
+  const [targetRect, setTargetRect] = useState(null)
+  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, placement: "center" })
+  const [isTargetSettled, setIsTargetSettled] = useState(false)
+  const tooltipRef = useRef(null)
+
+  useEffect(() => {
+    if (!step) {
+      return
+    }
+    let activeTarget = null
+    let rafId = 0
+    let observer = null
+    let released = false
+    let stopListening = () => {}
+
+    const rectChanged = (a, b) => {
+      if (!a || !b) {
+        return true
+      }
+      const threshold = 1
+      return (
+        Math.abs(a.top - b.top) > threshold ||
+        Math.abs(a.left - b.left) > threshold ||
+        Math.abs(a.width - b.width) > threshold ||
+        Math.abs(a.height - b.height) > threshold
+      )
+    }
+
+    const setRectIfChanged = (nextRect) => {
+      setTargetRect((prev) => {
+        const next = rectChanged(prev, nextRect) ? nextRect : prev
+        if (next !== prev) {
+          setIsTargetSettled(false)
+          window.clearTimeout(settleTimer)
+          settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
+        }
+        return next
+      })
+    }
+
+    let settleTimer = window.setTimeout(() => setIsTargetSettled(true), 180)
+
+    const bindTarget = (target) => {
+      activeTarget = target
+      const update = () => {
+        if (!activeTarget) {
+          return
+        }
+        setRectIfChanged(activeTarget.getBoundingClientRect())
+      }
+      update()
+      if (typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" })
+      }
+      window.addEventListener("resize", update)
+      window.addEventListener("scroll", update, true)
+      stopListening = () => {
+        window.removeEventListener("resize", update)
+        window.removeEventListener("scroll", update, true)
+      }
+    }
+
+    const resolveTarget = () => {
+      const nextTarget = document.querySelector(step.target)
+      if (!nextTarget) {
+        return false
+      }
+      if (nextTarget !== activeTarget) {
+        stopListening()
+        bindTarget(nextTarget)
+      } else {
+        setRectIfChanged(nextTarget.getBoundingClientRect())
+      }
+      return true
+    }
+
+    const startedAt = performance.now()
+    const pollForTarget = () => {
+      if (released) {
+        return
+      }
+      if (resolveTarget()) {
+        return
+      }
+      if (performance.now() - startedAt > 1400) {
+        setTargetRect(null)
+        return
+      }
+      rafId = window.requestAnimationFrame(pollForTarget)
+    }
+
+    if (!resolveTarget()) {
+      rafId = window.requestAnimationFrame(pollForTarget)
+      observer = new MutationObserver(() => {
+        resolveTarget()
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+    }
+
+    return () => {
+      released = true
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      window.clearTimeout(settleTimer)
+      if (observer) {
+        observer.disconnect()
+      }
+      stopListening()
+    }
+  }, [step])
+
+  useEffect(() => {
+    const tooltip = tooltipRef.current
+    if (!tooltip) {
+      return
+    }
+    if (!targetRect) {
+      setTooltipPos({
+        top: Math.max(80, window.innerHeight * 0.28),
+        left: Math.max(24, window.innerWidth * 0.5 - 160),
+        placement: "center",
+      })
+      return
+    }
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const spacing = 16
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const preferred = step?.placement || "bottom"
+
+    const fits = {
+      top: targetRect.top >= tooltipRect.height + spacing,
+      bottom: vh - targetRect.bottom >= tooltipRect.height + spacing,
+      left: targetRect.left >= tooltipRect.width + spacing,
+      right: vw - targetRect.right >= tooltipRect.width + spacing,
+    }
+
+    const available = {
+      top: targetRect.top,
+      bottom: vh - targetRect.bottom,
+      left: targetRect.left,
+      right: vw - targetRect.right,
+    }
+
+    let placement = preferred
+    if (!fits[placement]) {
+      const ordered = ["bottom", "right", "left", "top"]
+      placement = ordered.find((p) => fits[p]) || ordered.sort((a, b) => available[b] - available[a])[0]
+    }
+
+    let top = targetRect.bottom + spacing
+    let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2
+
+    if (placement === "top") {
+      top = targetRect.top - spacing - tooltipRect.height
+    }
+    if (placement === "left") {
+      left = targetRect.left - spacing - tooltipRect.width
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
+    }
+    if (placement === "right") {
+      left = targetRect.right + spacing
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
+    }
+
+    top = Math.min(Math.max(top, spacing), vh - tooltipRect.height - spacing)
+    left = Math.min(Math.max(left, spacing), vw - tooltipRect.width - spacing)
+    setTooltipPos({ top, left, placement })
+  }, [step, targetRect])
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [])
+
+  if (!step) {
+    return null
+  }
+
+  const progress = totalSteps > 0 ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0
+  const spotlightRect = targetRect && isTargetSettled
+    ? {
+        top: Math.max(0, targetRect.top - 8),
+        left: Math.max(0, targetRect.left - 8),
+        width: Math.max(0, targetRect.width + 16),
+        height: Math.max(0, targetRect.height + 16),
+      }
+    : null
+
+  const overlayMasks = spotlightRect
+    ? [
+        { top: 0, left: 0, width: viewportWidth, height: spotlightRect.top },
+        { top: spotlightRect.top, left: 0, width: spotlightRect.left, height: spotlightRect.height },
+        {
+          top: spotlightRect.top,
+          left: spotlightRect.left + spotlightRect.width,
+          width: Math.max(0, viewportWidth - (spotlightRect.left + spotlightRect.width)),
+          height: spotlightRect.height,
+        },
+        {
+          top: spotlightRect.top + spotlightRect.height,
+          left: 0,
+          width: viewportWidth,
+          height: Math.max(0, viewportHeight - (spotlightRect.top + spotlightRect.height)),
+        },
+      ]
+    : [{ top: 0, left: 0, width: viewportWidth, height: viewportHeight }]
+
+  return (
+    <div className="tour-overlay" role="dialog" aria-modal="true" aria-label={step.title}>
+      {overlayMasks.map((mask, index) => (
+        <div
+          key={`mask-${index}`}
+          className="tour-overlay__mask"
+          style={{ top: mask.top, left: mask.left, width: mask.width, height: mask.height }}
+        />
+      ))}
+      {spotlightRect && <div className="tour-highlight" style={spotlightRect} />}
+      <div
+        ref={tooltipRef}
+        className={`tour-tooltip tour-tooltip--${tooltipPos.placement}`}
+        style={{ top: tooltipPos.top, left: tooltipPos.left }}
+      >
+        <div className="tour-progress">
+          <div className="tour-progress__header">
+            <span>
+              Step {stepIndex + 1} of {totalSteps}
+            </span>
+            <span>{progress}%</span>
+          </div>
+          <div className="tour-progress__bar" aria-hidden="true">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+        <h3 className="tour-tooltip__title">{step.title}</h3>
+        <p className="tour-tooltip__body">{step.body}</p>
+        <div className="tour-tooltip__actions">
+          <button className="btn btn--subtle" type="button" onClick={onClose}>
+            Skip tour
+          </button>
+          <div className="tour-tooltip__nav">
+            <button className="btn btn--subtle" type="button" onClick={onPrev} disabled={stepIndex === 0}>
+              Back
+            </button>
+            <button className="btn btn--primary" type="button" onClick={onNext}>
+              {stepIndex + 1 === totalSteps ? "Finish" : "Next"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LoginPage({
   ssoUserId,
   setSsoUserId,
@@ -610,6 +1014,19 @@ function App() {
   const [planningOnboardingDismissed, setPlanningOnboardingDismissed] = useState(
     planningOnboardingInitiallyDismissed,
   )
+  const [enrollmentTourCompleted, setEnrollmentTourCompleted] = useState(
+    enrollmentTourInitiallyCompleted,
+  )
+  const [tourWelcomeDismissed, setTourWelcomeDismissed] = useState(
+    tourWelcomeInitiallyDismissed,
+  )
+  const [tourIntroOpen, setTourIntroOpen] = useState(false)
+  const [tourState, setTourState] = useState({ active: null, stepIndex: 0 })
+  const [onboardingChecklist, setOnboardingChecklist] = useState({
+    filteredCatalog: false,
+    addedCourse: false,
+    openedCalendar: false,
+  })
   const [planningContext, setPlanningContext] = useState(() =>
     initialUser
       ? normalizePlanningContext(loadUserBucket(initialUser.id, "planningContext", null))
@@ -660,6 +1077,11 @@ function App() {
     [plans, lastSavedPlansJson],
   )
 
+  const tourActive = tourState.active === "app"
+  const tourSteps = APP_TOUR_STEPS
+  const activeTourStep = tourActive ? tourSteps[tourState.stepIndex] : null
+  const tourCtaLabel = enrollmentTourCompleted ? "Replay tour" : "Start tour"
+
   const goToView = useCallback(
     (view) => {
       if (activeView === "planning" && view !== "planning" && plansDirty) {
@@ -671,6 +1093,37 @@ function App() {
     },
     [activeView, plansDirty],
   )
+
+  const dismissTourIntro = useCallback(() => {
+    setTourIntroOpen(false)
+    if (!tourWelcomeDismissed) {
+      persistTourWelcomeDismissed()
+      setTourWelcomeDismissed(true)
+    }
+  }, [tourWelcomeDismissed])
+
+  const startEnrollmentTour = useCallback(
+    (fromIntro = false) => {
+      setActiveView("dashboard")
+      setTourState({ active: "app", stepIndex: 0 })
+      if (!tourWelcomeDismissed) {
+        persistTourWelcomeDismissed()
+        setTourWelcomeDismissed(true)
+      }
+      if (fromIntro) {
+        setTourIntroOpen(false)
+      }
+    },
+    [tourWelcomeDismissed],
+  )
+
+  const endEnrollmentTour = useCallback((completed = false) => {
+    setTourState({ active: null, stepIndex: 0 })
+    if (completed) {
+      persistEnrollmentTourCompleted()
+      setEnrollmentTourCompleted(true)
+    }
+  }, [])
 
   const hydrateUserState = (user) => {
     const nextEnrolled = loadUserBucket(user.id, "enrolled", [])
@@ -747,6 +1200,29 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-motion", reduceMotionActive)
   }, [reduceMotionActive])
+
+  useEffect(() => {
+    if (session && currentUser && !tourWelcomeDismissed) {
+      setTourIntroOpen(true)
+    }
+  }, [session, currentUser, tourWelcomeDismissed])
+
+  useEffect(() => {
+    if (!tourActive || !activeTourStep?.view) {
+      return
+    }
+    if (activeView !== activeTourStep.view) {
+      setActiveView(activeTourStep.view)
+    }
+  }, [tourActive, activeTourStep, activeView])
+
+  useEffect(() => {
+    if (searchText || departmentFilter !== "All" || seatFilter !== "all" || programOnly) {
+      setOnboardingChecklist((prev) =>
+        prev.filteredCatalog ? prev : { ...prev, filteredCatalog: true },
+      )
+    }
+  }, [searchText, departmentFilter, seatFilter, programOnly])
 
   const clearEnrollmentUndo = useCallback(() => {
     if (enrollmentUndoTimerRef.current) {
@@ -1141,6 +1617,9 @@ function App() {
     }
 
     setEnrolledIds((prev) => [...prev, course.id])
+    setOnboardingChecklist((prev) =>
+      prev.addedCourse ? prev : { ...prev, addedCourse: true },
+    )
     pushToast("success", `${course.id} was added to your enrollment.`, {
       label: "View week calendar",
       onAction: () => setActiveView("dashboard"),
@@ -1555,6 +2034,13 @@ function App() {
     setActiveView("dashboard")
     setPlanningContext({ targetTermId: DEFAULT_PLANNING_TARGET_TERM_ID })
     calendarPopoutSourceRef.current = "enrollment"
+    setTourIntroOpen(false)
+    setTourState({ active: null, stepIndex: 0 })
+    setOnboardingChecklist({
+      filteredCatalog: false,
+      addedCourse: false,
+      openedCalendar: false,
+    })
   }
 
   const openCalendarPopout = (source = "enrollment") => {
@@ -1568,6 +2054,11 @@ function App() {
       return
     }
     popupRef.current = popup
+    if (source === "enrollment") {
+      setOnboardingChecklist((prev) =>
+        prev.openedCalendar ? prev : { ...prev, openedCalendar: true },
+      )
+    }
     const blocks = source === "planning" ? planningCalendarBlocks : dashboardBlocks
     const vw = source === "planning" ? planningViewWindow : dashboardViewWindow
     const termOpt = getPlanningTermOption(planningContext.targetTermId)
@@ -1609,7 +2100,7 @@ function App() {
         <img className="app-logo__icon" src={easyEnrollLogoIcon} alt="" aria-hidden="true" />
         <img className="app-logo__text" src={easyEnrollLogoText} alt="Easy Enroll" />
       </div>
-      <nav className="nav-row">
+      <nav className="nav-row" data-tour="nav">
         <button
           className={`btn ${activeView === "dashboard" ? "btn--primary" : "btn--subtle"}`}
           type="button"
@@ -1647,7 +2138,59 @@ function App() {
 
       <ToastContainer />
 
-      {!enrollmentOnboardingDismissed && activeView === "dashboard" && (
+      {tourIntroOpen && (
+        <Modal
+          title="Welcome to Easy Enroll"
+          onClose={dismissTourIntro}
+          actions={
+            <>
+              <button className="btn btn--subtle" type="button" onClick={dismissTourIntro}>
+                Maybe later
+              </button>
+              <button className="btn btn--primary" type="button" onClick={() => startEnrollmentTour(true)}>
+                Start tour
+              </button>
+            </>
+          }
+        >
+          <p>
+            We can walk you through Enrollment, Planning, Profile, and Settings so you can navigate the full product
+            confidently.
+          </p>
+          <div className="tour-intro">
+            <p className="tour-intro__title">You will see:</p>
+            <ul className="tour-intro__list">
+              <li>Navigation between Enrollment, Planning, Profile, and Settings.</li>
+              <li>How to filter and add courses to your term.</li>
+              <li>Planning drafts, profile snapshots, and accessibility controls.</li>
+            </ul>
+          </div>
+        </Modal>
+      )}
+
+      {tourActive && (
+        <TourOverlay
+          step={activeTourStep}
+          stepIndex={tourState.stepIndex}
+          totalSteps={tourSteps.length}
+          onNext={() => {
+            if (tourState.stepIndex + 1 >= tourSteps.length) {
+              endEnrollmentTour(true)
+            } else {
+              setTourState((prev) => ({ ...prev, stepIndex: prev.stepIndex + 1 }))
+            }
+          }}
+          onPrev={() => {
+            setTourState((prev) => ({
+              ...prev,
+              stepIndex: Math.max(0, prev.stepIndex - 1),
+            }))
+          }}
+          onClose={() => endEnrollmentTour(false)}
+        />
+      )}
+
+      {!enrollmentOnboardingDismissed && activeView === "dashboard" && !tourActive && (
         <div className="onboarding-notice" role="region" aria-label="Getting started with enrollment">
           <div className="onboarding-notice__body">
             <p className="onboarding-notice__title">
@@ -1669,17 +2212,37 @@ function App() {
                 <strong>Settings</strong> has calendar focus, contrast, and keyboard tips.
               </li>
             </ul>
+            <div className="onboarding-checklist" role="group" aria-label="Getting started checklist">
+              <p className="onboarding-checklist__title">Getting started checklist</p>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.filteredCatalog} readOnly />
+                Filter the catalog
+              </label>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.addedCourse} readOnly />
+                Add a course to enrollment
+              </label>
+              <label className="onboarding-checklist__item">
+                <input type="checkbox" checked={onboardingChecklist.openedCalendar} readOnly />
+                Open the weekly calendar
+              </label>
+            </div>
           </div>
-          <button
-            className="btn btn--subtle"
-            type="button"
-            onClick={() => {
-              persistEnrollmentOnboardingDismissed()
-              setEnrollmentOnboardingDismissed(true)
-            }}
-          >
-            Dismiss
-          </button>
+          <div className="onboarding-notice__actions">
+            <button className="btn btn--primary" type="button" onClick={() => startEnrollmentTour(false)}>
+              {tourCtaLabel}
+            </button>
+            <button
+              className="btn btn--subtle"
+              type="button"
+              onClick={() => {
+                persistEnrollmentOnboardingDismissed()
+                setEnrollmentOnboardingDismissed(true)
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -1704,7 +2267,7 @@ function App() {
 
       {activeView === "dashboard" && (
         <>
-          <section className="recommendation-panel">
+          <section className="recommendation-panel" data-tour="recommended">
             <h2>Recommended (next semester — year {classYear} focus)</h2>
             <div className="recommendation-grid">
               {recommendations.map((item) => (
@@ -1717,7 +2280,7 @@ function App() {
             </div>
           </section>
 
-          <section className="search-bar">
+          <section className="search-bar" data-tour="search">
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
@@ -1783,8 +2346,8 @@ function App() {
           </div>
 
           <section className="pane-grid">
-            <article className="pane">
-              <header>
+            <article className="pane" data-tour="available">
+              <header data-tour="available-header">
                 <h2>Available Courses</h2>
                 <p>Click for details. Drag to enroll.</p>
               </header>
@@ -1815,8 +2378,8 @@ function App() {
               </div>
             </article>
 
-            <article className="pane" onDragOver={(event) => event.preventDefault()} onDrop={onDropToEnroll}>
-              <header>
+            <article className="pane" data-tour="enrolled" onDragOver={(event) => event.preventDefault()} onDrop={onDropToEnroll}>
+              <header data-tour="enrolled-header">
                 <h2>Enrolled Courses</h2>
                 <p>Drop here to enroll. Remove with confirmation.</p>
               </header>
@@ -1845,8 +2408,8 @@ function App() {
             </article>
           </section>
 
-          <section className="calendar-section">
-            <header className="calendar-header">
+          <section className="calendar-section" data-tour="calendar">
+            <header className="calendar-header" data-tour="calendar-header">
               <h2>Weekly calendar</h2>
               <div className="calendar-header__actions">
                 <button
@@ -1926,7 +2489,7 @@ function App() {
 
       {activeView === "planning" && (
         <section className="planning-section">
-          <div className="planning-term-banner" role="region" aria-label="Planning target term">
+          <div className="planning-term-banner" data-tour="planning-term" role="region" aria-label="Planning target term">
             <div className="planning-term-banner__row">
               <label className="planning-term-banner__label">
                 <span className="planning-term-banner__label-text">Planning draft for</span>
@@ -2025,7 +2588,7 @@ function App() {
                 </button>
               </div>
 
-              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+              <section className="search-bar search-bar--planning" data-tour="planning-search" aria-label="Catalog search and filters">
                 <input
                   value={searchText}
                   onChange={(event) => setSearchText(event.target.value)}
@@ -2282,7 +2845,7 @@ function App() {
                 </div>
               )}
 
-              <section className="search-bar search-bar--planning" aria-label="Catalog search and filters">
+              <section className="search-bar search-bar--planning" data-tour="planning-search" aria-label="Catalog search and filters">
                 <input
                   value={searchText}
                   onChange={(event) => setSearchText(event.target.value)}
@@ -2742,7 +3305,7 @@ function App() {
             </div>
           </div>
 
-          <div className="profile-wide-card profile-information-card" aria-labelledby="profile-information-heading">
+          <div className="profile-wide-card profile-information-card" data-tour="profile-info" aria-labelledby="profile-information-heading">
             <div className="profile-group profile-group--information">
               <h3 id="profile-information-heading" className="profile-group__title">
                 Student Information
@@ -2792,7 +3355,7 @@ function App() {
             </div>
           </div>
 
-          <div className="profile-wide-card profile-registration-card" aria-labelledby="profile-registration-heading">
+          <div className="profile-wide-card profile-registration-card" data-tour="profile-registration" aria-labelledby="profile-registration-heading">
             <div className="profile-group profile-group--registration">
               <h3 id="profile-registration-heading" className="profile-group__title">
                 Registration Information
@@ -2833,7 +3396,7 @@ function App() {
         <section className="settings-section settings-section--wide">
           <h2 className="settings-page-title">Settings</h2>
           <div className="settings-page-grid">
-            <div className="settings-page-grid__col settings-page-grid__col--controls">
+            <div className="settings-page-grid__col settings-page-grid__col--controls" data-tour="settings-controls">
               <label className="toggle-row">
                 <input
                   type="checkbox"
@@ -2953,7 +3516,7 @@ function App() {
                 </div>
               </details>
             </div>
-            <div className="settings-page-grid__col settings-page-grid__col--help">
+            <div className="settings-page-grid__col settings-page-grid__col--help" data-tour="settings-help">
               <h3 className="settings-help-heading">Keyboard and tips</h3>
               <p className="muted settings-help-lead">Keyboard shortcuts and quick tips for the prototype.</p>
               <div className="settings-help-box">
