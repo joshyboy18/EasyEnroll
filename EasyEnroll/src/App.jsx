@@ -1489,6 +1489,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     pop.document.open()
     pop.document.write(html)
@@ -2128,6 +2132,10 @@ function App() {
       vw.viewStartMin,
       vw.viewEndMin,
       caption,
+      {
+        logoIconSrc: easyEnrollLogoIcon,
+        logoTextSrc: easyEnrollLogoText,
+      },
     )
     popup.document.open()
     popup.document.write(html)
@@ -3565,7 +3573,7 @@ function App() {
                     />
                     Reduce interface motion (also respects your system’s “reduced motion” when set to off)
                   </label>
-                  <p className="muted" style={{ margin: 0, fontSize: "0.86rem" }}>
+                  <p className="muted settings-hint">
                     When the OS already requests reduced motion, the calmer experience applies even with this unset.
                   </p>
                   <label className="toggle-row">
