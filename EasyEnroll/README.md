@@ -1,6 +1,6 @@
 # EasyEnroll
 
-A student course enrollment and planning prototype built as an HCI (Human-Computer Interaction) course project. EasyEnroll helps students explore courses, manage their current enrollment, plan future semesters, and detect scheduling conflicts while respecting academic credit limits.
+EasyEnroll is a student course enrollment and planning prototype created for an HCI (Human-Computer Interaction) course project. It helps students explore courses, manage their current enrollment, draft future-term plans, and detect scheduling conflicts while respecting academic credit limits.
 
 ## Project Overview
 
@@ -44,15 +44,10 @@ EasyEnroll/
 │       ├── ics.js                  # iCalendar export (.ics format)
 │       └── timeFormat.js           # Time display utilities
 ├── public/                     # Static assets
-├── .cursor/
-│   └── rules/                  # Local Cursor IDE guidance
-├── lecture_extracts/           # HCI lecture materials (study reference)
 ├── index.html                  # HTML entry point
 ├── package.json                # Node.js project manifest
 ├── vite.config.js              # Vite build configuration
 ├── eslint.config.js            # Code quality rules
-├── tasks.md                    # Implementation roadmap
-├── hci-ui-suggestions.md       # HCI design principles & backlog
 └── README.md                   # This file
 ```
 
@@ -104,12 +99,12 @@ npm run dev
 
 The app will be available at `http://localhost:5173` (or another port if 5173 is in use).
 
-For other ports use:
-```
-npm run dev -- --port####
+For other ports use (example):
+```bash
+npm run dev -- --port 3000
 ```
 
-Replaceing the '#' with numbers of your choice
+Replace `3000` with any available port number you prefer.
 
 **Hot Reload:** Edit any `.jsx` or `.css` file and the browser will automatically refresh without losing state.
 
@@ -271,6 +266,23 @@ npm run dev
 ```bash
 npm run lint
 ```
+
+## Testing
+
+This prototype does not include a dedicated test suite. If you want to add tests, consider using `vitest` or `jest` for unit tests and `playwright` or `cypress` for end-to-end flows.
+
+## Contributing
+
+Contributions are welcome for improving accessibility, UX flows, or adding real backend integration. To contribute:
+
+1. Fork the repository and create a topic branch.
+2. Run `npm install` and make changes locally.
+3. Ensure linting passes: `npm run lint`.
+4. Open a pull request with a short description of changes.
+
+## Contact
+
+For questions about this project, contact the original author or the course instructor listed in project materials.
 
 ## License & Credits
 
