@@ -228,7 +228,7 @@ function persistTourWelcomeDismissed() {
 const EVENT_COLOR_PRESETS = ["#b8e1ff", "#ffd6e8", "#d8f3dc", "#ffe8b6", "#e2d4ff", "#cfeff7"]
 
 const defaultSettings = {
-  compactCalendar: false,
+  compactCalendar: true,
   showConflictAlerts: true,
   showReminderAlerts: true,
   /** Extra soft UI when the OS does not already request reduce (stack with prefers-reduced-motion). */
@@ -236,7 +236,7 @@ const defaultSettings = {
   /** High-contrast theme for readability (also helps in bright light). */
   highContrast: false,
   /** Tighter course cards in catalog lists. */
-  compactCatalog: false,
+  compactCatalog: true,
 }
 
 function mergeSettingsWithDefaults(stored) {
