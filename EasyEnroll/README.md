@@ -187,11 +187,11 @@ Displays short-lived user feedback messages for success, warning, and error stat
 
 Three test accounts are included in the application. Login with any of these:
 
-| Name | Email | Program |
-|------|-------|----------|
-| Jordan Lee | `jlee@easyenroll.edu` | BS Computer Science + Math Minor |
-| Avery Patel | `apatel@easyenroll.edu` | BS Biology |
-| Morgan Rivera | `mrivera@easyenroll.edu` | BS Computer Science |
+| Name | Email | Program | Year |
+|------|-------|---------|------|
+| Jordan Lee | `jlee@easyenroll.edu` | BS Computer Science | Freshman |
+| Avery Patel | `apatel@easyenroll.edu` | BS Biology | Sophomore |
+| Morgan Rivera | `mrivera@easyenroll.edu` | BS Computer Science | Junior |
 
 ## Software Engineering Practices
 
