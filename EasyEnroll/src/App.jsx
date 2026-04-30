@@ -2103,7 +2103,20 @@ function App() {
       return
     }
     calendarPopoutSourceRef.current = source
-    const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=650")
+    /* const popup = window.open("about:blank", "easy-enroll-calendar", "width=1100,height=650") */
+    const popupWidth = 1100
+    const popupHeight = 200
+    const dualScreenLeft = window.screenLeft !== undefined ? window.screenLeft : window.screenX
+    const dualScreenTop = window.screenTop !== undefined ? window.screenTop : window.screenY
+    const screenWidth = window.innerWidth || document.documentElement.clientWidth || screen.width
+    const screenHeight = window.innerHeight || document.documentElement.clientHeight || screen.height
+    const left = Math.round(dualScreenLeft + (screenWidth - popupWidth) / 2)
+    const top = Math.round(dualScreenTop + (screenHeight - popupHeight) / 2)
+    const popup = window.open(
+    "about:blank",
+    "easy-enroll-calendar", 
+    `width=${popupWidth}height=${popupHeight}left=${left}top=${top}`
+    )
     if (!popup) {
       pushToast("error", "Pop-up was blocked. Allow pop-ups to see the calendar window.")
       return
