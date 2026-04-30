@@ -915,9 +915,13 @@ function LoginPage({
     <main className="login-page">
       <section className="login-card">
         <img className="login-logo" src={easyEnrollLoginLogo} alt="Easy Enroll" />
-        <p>Choose your SSO identity to access your enrollment dashboard and saved plans.</p>
+        <p align="center" style={{ color: "#333", fontSize: "1.25em", margin: "0em 0em 0em 0em", fontWeight: "bold" }}>
+            Welcome!
+          </p>
         <label>
-          SSO Identity
+          <p align="center" style={{ color: "#949494", fontStyle: "italic", margin: "0em 0em 3em 0em" }}>
+            Login to Your University Account to Enroll
+          </p>
           <select value={ssoUserId} onChange={(event) => setSsoUserId(event.target.value)}>
             {mockUsers.map((user) => (
               <option key={user.id} value={user.id}>
@@ -2246,7 +2250,12 @@ function App() {
       )}
 
       {!enrollmentOnboardingDismissed && activeView === "dashboard" && !tourActive && (
-        <div className="onboarding-notice" role="region" aria-label="Getting started with enrollment">
+        <div
+          className="onboarding-notice"
+          role="region"
+          aria-label="Getting started with enrollment"
+          style={{ position: "relative" }}
+        >
           <div className="onboarding-notice__body">
             <p className="onboarding-notice__title">
               <strong>Quick tips</strong> <span className="muted">(one-time coach marks)</span>
@@ -2283,7 +2292,10 @@ function App() {
               </label>
             </div>
           </div>
-          <div className="onboarding-notice__actions">
+          <div
+            className="onboarding-notice__actions"
+            style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 8 }}
+          >
             <button className="btn btn--primary" type="button" onClick={() => startEnrollmentTour(false)}>
               {tourCtaLabel}
             </button>
