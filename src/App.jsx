@@ -1330,7 +1330,7 @@ function App() {
   const courseMap = useMemo(() => {
     if (!courses || courses.length === 0) return new Map()
     return new Map(courses.map((course) => [course.id, course]))
-  }, [courses])
+  }, [])
 
   const enrolledCompletionIds = useMemo(() => {
     if (!enrolledIds || enrolledIds.length === 0) return new Set()
@@ -4016,3 +4016,4 @@ function App() {
 }
 
 export default App
+
