@@ -27,14 +27,14 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
 
       - run: npm install
-        working-directory: ./EasyEnroll
+        working-directory: .
 
       - run: npx vite build --base /EasyEnroll/
-        working-directory: ./EasyEnroll
+        working-directory: .
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         if: github.ref == 'refs/heads/main'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./EasyEnroll/dist
+          publish_dir: ./dist

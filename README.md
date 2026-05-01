@@ -1,98 +1,91 @@
 # EasyEnroll
 
-EasyEnroll is a student course enrollment and planning prototype created for an HCI (Human-Computer Interaction) course project. It helps students explore courses, manage their current enrollment, draft future-term plans, and detect scheduling conflicts while respecting academic credit limits.
+EasyEnroll is a student course enrollment and planning prototype for our HCI course project. It was designed to address a common problem with school registration systems: they are often cluttered, difficult to scan, and not very helpful for building a conflict-free schedule.
 
-## Project Overview
+## Hosted Link
+https://joshyboy18.github.io/EasyEnroll/
 
-EasyEnroll is a **single-page React application** (frontend only) that demonstrates usable, accessible course scheduling through an interactive calendar interface. It emphasizes HCI principles like clear feedback, constraint visibility, and error prevention.
+## Project Summary
+
+EasyEnroll is a frontend-only React application that helps students search for classes, manage enrollment, draft future-term plans, degree progress, and visualize weekly schedules. The interface emphasizes clear feedback, constraint visibility, and error prevention.
 
 **Key Features:**
-- 📅 Visual week-at-a-glance calendar with Mon–Fri schedule grid
-- 🔍 Course catalog search with filtering by department, suggested year, and major requirements
-- ✅ Enrollment management with live conflict detection
-- 📋 Planning mode for drafting future-term schedules
-- ⚠️ Toast notifications for real-time feedback
-- 💾 Local persistence (browser localStorage)
-- 📤 Export schedules as `.ics` files (Google Calendar, Outlook, etc.)
-- ♿ Accessibility features (ARIA labels, keyboard support)
+- 🎯 User-friendly interface with a focus on usability and intuitive design
+- 📚 Onboarding tutorial to guide new users through the application
+- 🔍 Course catalog search with filtering by department, seat status, and degree requirements
+- ✅ Enrollment validation with real-time conflict detection
+- 📋 Planning mode for drafting and comparing future-term schedules
+- 📅 Time-grid calendar with Sun–Sat schedule visualization
+- 📤 Schedule pop-out and export as `.ics` files for calendar apps (Google Calendar, Outlook, etc.)
+- ♿ Accessibility features (ARIA labels, keyboard navigation, high-contrast mode, reduced motion)
+- ⚠️ Toast notifications for user feedback and error handling
+- 💾 Browser localStorage persistence for sessions, plans, and profiles
 
 ## Project Structure
 
-```
+```text
 EasyEnroll/
 ├── src/
-│   ├── App.jsx                 # Main app container & global state
-│   ├── App.css                 # App-wide styling
-│   ├── main.jsx                # React entry point
-│   ├── index.css               # Global styles & reset
+│   ├── App.jsx                      (Main app state and layout)
+│   ├── App.css                      (Application-wide styles)
+│   ├── main.jsx                     (React entry point)
+│   ├── index.css                    (Global styles and reset)
 │   ├── components/
-│   │   ├── TimeGridCalendar.jsx    # Visual calendar grid (Mon–Fri, 24h)
-│   │   └── ToastStack.jsx          # Toast notification system
+│   │   ├── TimeGridCalendar.jsx     (Time-grid calendar renderer)
+│   │   └── ToastStack.jsx           (Toast notification system)
 │   ├── data/
-│   │   ├── courses.js              # 40+ course catalog (CS, BIO, Gen Ed)
-│   │   ├── mockUsers.js            # Demo user accounts
-│   │   ├── planningTerms.js        # Academic calendar (Spring 2026, Fall 2026, etc.)
-│   │   └── degreeSheets.js         # Degree requirements by program
+│   │   ├── courses.js               (Course catalog data)
+│   │   ├── degreeSheets.js          (Degree requirements by program)
+│   │   ├── mockUsers.js             (Demo user accounts for testing)
+│   │   └── planningTerms.js         (Academic term definitions)
 │   └── utils/
-│       ├── auth.js                 # Login validation (password, SSO)
-│       ├── storage.js              # localStorage persistence
-│       ├── calendarLayout.js       # Calendar rendering math & positioning
-│       ├── conflicts.js            # Schedule conflict detection
-│       ├── courseColors.js         # Color assignment per course
-│       ├── courseDrag.js           # Drag-and-drop course interactions
-│       ├── degreeProgress.js       # Degree audit & course recommendations
-│       ├── ics.js                  # iCalendar export (.ics format)
-│       └── timeFormat.js           # Time display utilities
-├── public/                     # Static assets
-├── index.html                  # HTML entry point
-├── package.json                # Node.js project manifest
-├── vite.config.js              # Vite build configuration
-├── eslint.config.js            # Code quality rules
-└── README.md                   # This file
+│       ├── auth.js                  (Login validation logic)
+│       ├── calendarLayout.js        (Time-grid positioning and layout)
+│       ├── conflicts.js             (Schedule conflict detection)
+│       ├── courseColors.js          (Course color assignment)
+│       ├── courseDrag.js            (Drag-and-drop interaction)
+│       ├── degreeProgress.js        (Degree audit and recommendations)
+│       ├── ics.js                   (iCalendar export generation)
+│       ├── prerequisites.js         (Prerequisite checking)
+│       ├── storage.js               (localStorage persistence)
+│       └── timeFormat.js            (Time display formatting)
+├── public/
+├── index.html
+├── package.json
+├── vite.config.js
+├── eslint.config.js
+└── README.md
 ```
 
-## Libraries & Frameworks
+## Libraries and Frameworks
 
-### Core Dependencies
-- **[React](https://react.dev/)** (v19.2.0) — UI component library
-  - `react-dom` — DOM rendering
-- **[Vite](https://vite.dev/)** (v7.2.4) — Lightning-fast build tool & dev server
-  - `@vitejs/plugin-react` — React support with Fast Refresh (HMR)
+### Core Technologies
+- **React 19** — Component-based UI framework with hooks for state management
+- **React DOM** — DOM rendering and lifecycle management
+- **Vite** — Fast development server with Hot Module Replacement (HMR) and optimized production builds
+- **ESLint** — Static code analysis for consistency and best practices
 
-### Development Dependencies
-- **[ESLint](https://eslint.org/)** (v9.39.1) — Code quality & consistency
-  - `eslint-plugin-react-hooks` — React best practices
-  - `eslint-plugin-react-refresh` — Vite HMR checks
-- **TypeScript** types (optional, installed but not required to use)
-  - `@types/react`, `@types/react-dom`
+### Why These Choices
+- React provides reusable component architecture for modular UI design
+- Vite enables rapid iteration with instant feedback during development
+- ESLint ensures consistent code style across the entire team
+- No backend API needed; mock data allows focus on interaction design and UX
 
-### Why These Choices?
-- **React** provides component reusability and state management for complex scheduling logic
-- **Vite** enables rapid development with instant Hot Module Replacement (edit code, see changes immediately)
-- **ESLint** enforces code consistency across the team
-- **No backend API** — data is mocked and stored locally (localStorage) for rapid prototyping
-
-## Getting Started
+## Running the Project
 
 ### Prerequisites
-- **Node.js** (v16+) with npm
-- A modern browser (Chrome, Firefox, Safari, Edge)
 
-### Installation
+- Node.js and npm
+- A modern browser such as Chrome, Edge, Firefox, or Safari
 
-1. **Navigate to the project directory:**
-   ```bash
-   cd EasyEnroll
-   ```
+### Install
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-### Running the Development Server
+### Start the Dev Server
 
-Start the local dev server with Hot Module Replacement:
 ```bash
 npm run dev
 ```
@@ -108,184 +101,185 @@ Replace `3000` with any available port number you prefer.
 
 **Hot Reload:** Edit any `.jsx` or `.css` file and the browser will automatically refresh without losing state.
 
-### Building for Production
+### Build for Production
 
-Create an optimized production bundle:
 ```bash
 npm run build
 ```
 
-Output will be in the `dist/` folder. Preview the production build locally:
+### Preview the Build
 ```bash
 npm run preview
 ```
 
-### Code Quality
+### Lint the Code
 
-Check for ESLint violations:
 ```bash
 npm run lint
 ```
 
+## Code Organization & Readability
+
+The codebase follows modular design principles to maximize clarity and maintainability:
+
+### Component Layer (`src/components/`)
+- **Reusable UI pieces** with single responsibilities
+- **TimeGridCalendar.jsx** renders the calendar grid with overlap handling
+- **ToastStack.jsx** manages notification display and lifecycle
+- Components are self-contained and easy to reason about
+
+### Data Layer (`src/data/`)
+- **Separated from UI logic** to keep components clean
+- **Immutable mock data** for courses, users, and degree information
+- Easy to swap with API calls in the future without changing components
+
+### Utility Layer (`src/utils/`)
+- **Domain-specific logic** isolated from UI rendering
+- **Meaningful function names** like `hasCourseConflict`, `buildTimeGridBlocks`, `downloadIcsFile`
+- **Consistent naming conventions** across all modules (e.g., `toMinutes`, `formatHourGutterLabel`)
+- **Clear responsibility** — each file handles one feature area
+
+### Naming Conventions
+- React components use PascalCase: `TimeGridCalendar`, `ToastStack`
+- Functions use camelCase: `detectPlanConflicts`, `getCourseDegreeMatches`
+- Constants use UPPER_SNAKE_CASE: `MAX_CREDITS`, `MIN_IN_DAY`, `PLANNING_CREDIT_CAP_MESSAGE`
+- Booleans use descriptive prefixes: `showConflictAlerts`, `compactCalendar`
+
+### Comments & Documentation
+- Comments explain non-obvious logic (e.g., time-grid overlap calculations, iCalendar format rules)
+- JSDoc comments document function parameters and return types where helpful
+- Code follows consistent indentation and whitespace rules (enforced by ESLint)
+
+## Key Components
+
+### App.jsx
+
+Main application container and state coordinator. It handles authentication, enrollment, planning, settings, notifications, and calendar data.
+
+### TimeGridCalendar.jsx
+
+Renders the schedule grid and positions events on a time axis. It also handles overlap layout so conflicting items remain readable.
+
+### ToastStack.jsx
+
+Displays short-lived user feedback messages for success, warning, and error states.
+
+### Data Modules
+
+- `courses.js` — 40+ course catalog entries with meeting times, credits, and seat availability
+- `mockUsers.js` — Demo user accounts for testing different student scenarios
+- `degreeSheets.js` — Degree requirements and elective course mappings
+- `planningTerms.js` — Academic term definitions (Spring 2026, Fall 2026, etc.)
+
+### Utility Modules
+
+- `auth.js` — Password and SSO login validation
+- `conflicts.js` — Schedule overlap detection for courses and events
+- `degreeProgress.js` — Course-to-degree matching and recommendation engine
+- `calendarLayout.js` — Time-grid rendering math and overlap positioning
+- `courseDrag.js` — Drag-and-drop interaction and visual feedback
+- `ics.js` — iCalendar file generation and export
+- `storage.js` — Browser localStorage persistence and namespacing
+- `timeFormat.js` — Time display and parsing utilities
+
 ## Demo Users
 
-Three mock users are built in for testing. Use any of these credentials:
+Three test accounts are included in the application. Login with any of these:
 
-| Name | Email | Password | Class Year | Program |
-|------|-------|----------|-----------|---------|
-| Jordan Lee | `jlee@easyenroll.edu` | `demo123` | Freshman (1) | BS CS + Minor Math |
-| Avery Patel | `apatel@easyenroll.edu` | `demo123` | Sophomore (2) | BS Biology |
-| Morgan Rivera | `mrivera@easyenroll.edu` | `demo123` | Senior (4) | BS CS |
+| Name | Email | Program | Year |
+|------|-------|---------|------|
+| Jordan Lee | `jlee@easyenroll.edu` | BS Computer Science | Freshman |
+| Avery Patel | `apatel@easyenroll.edu` | BS Biology | Sophomore |
+| Morgan Rivera | `mrivera@easyenroll.edu` | BS Computer Science | Junior |
 
-## Key Workflows
+## Software Engineering Practices
 
-### 1. Enrollment (Current Term: Spring 2026)
-- **Search & Filter:** Browse catalog by department, seat availability, or suggested year
-- **Degree Matching:** Courses highlight major requirements and prerequisites
-- **Add Course:** Drag course cards onto calendar; system auto-detects scheduling conflicts
-- **Conflict Detection:** Toast alerts warn of time overlaps or credit limit exceeded (19 credit cap)
-- **View Calendar:** Visual Mon–Fri, 24-hour grid with color-coded courses
+### 1. Modular Design
+- Components, data, and utilities are separated by concern
+- Each file has a single, clear responsibility
+- Easy to locate and modify specific features without affecting others
 
-### 2. Planning (Draft Future Terms)
-- **Select Term:** Choose from Fall 2026, Spring 2027, or other available terms
-- **Draft Schedule:** Same search/filter/drag as Enrollment, but planning courses are striped/distinct
-- **Conflict Summary:** Displays both course-vs-course and course-vs-personal-event overlaps
-- **Save Plans:** Multiple named plans per term (e.g., "Plan A", "Plan B")
-- **Track Changes:** Dirty state indicator; `beforeunload` warning if unsaved
+### 2. Meaningful Naming
+- Function names describe what they do: `hasCourseConflict`, `detectPlanConflicts`, `buildTimeGridBlocks`
+- Variable names are descriptive: `enrolledIds`, `plannedCourses`, `timeSlots`
+- Abbreviations are avoided unless universally understood
 
-### 3. Profile & Settings
-- **Profile:** View/edit identity (name, email, avatar, programs)
-- **Settings:** Toggles for display preferences, accessibility options, and links to help resources
-- **Keyboard & Tips:** Built-in documentation of shortcuts and UI patterns
+### 3. Consistent Formatting
+- ESLint enforces code style across the project
+- Consistent indentation, spacing, and quote usage
+- All files follow the same structural patterns
 
-### 4. Export
-- **iCalendar:** Export planned schedule as `.ics` file
-- **Import Anywhere:** Open with Google Calendar, Outlook, Apple Calendar, etc.
+### 4. Appropriate Comments
+- Comments explain the "why" rather than the "what"
+- Complex logic (overlap detection, time calculations) includes explanatory comments
+- JSDoc-style comments on exported functions
 
-## Component Architecture
-
-### App.jsx (Main Container)
-Orchestrates all global state:
-- Authentication (user session, login/logout)
-- Enrollment view (enrolled courses, events)
-- Planning view (plans per term, plan-specific courses)
-- Calendar blocks & conflict detection
-- Toast notifications
-
-### TimeGridCalendar.jsx (Calendar Grid)
-Renders the visual schedule:
-- Positioned CSS blocks for each course/event
-- Handles overlapping courses (side-by-side layout)
-- Scrollable to focal time windows (e.g., 6am–8pm only)
-- Click handlers for course interaction
-
-### ToastStack.jsx (Notifications)
-Manages temporary feedback messages:
-- Success (green), error (red), info (blue)
-- Auto-dismiss after 4.5 seconds or manual close
-- ARIA `aria-live` for screen reader accessibility
+### 5. Error Prevention & Handling
+- Input validation before state updates
+- Toast notifications for user feedback
+- Graceful fallbacks for missing or invalid data
 
 ## Data Flow
 
+```text
+User logs in
+  ↓
+Load session and user data from localStorage
+  ↓
+Render enrolled courses, plans, and calendar blocks
+  ↓
+User searches, filters, or drags courses
+  ↓
+Conflict logic validates the action
+  ↓
+Update state and persist changes to localStorage
+  ↓
+Show toast feedback
+  ↓
+Optionally export schedule as .ics file
 ```
-User Login
-    ↓
-Load Auth Session (localStorage)
-    ↓
-Load Courses (courses.js)
-    ↓
-Load User's Enrollment/Plans (localStorage per user)
-    ↓
-Render Calendar (TimeGridCalendar)
-    ↓
-User Adds Course
-    ↓
-Check Conflicts (conflicts.js)
-    ↓
-If Valid: Save State (storage.js) → Show Success Toast
-    ↓
-If Invalid: Show Error Toast
-    ↓
-Export → Generate iCalendar (ics.js) → Download
-```
-
-## Persistence & Storage
-
-All data is stored in **browser localStorage** under namespaced keys:
-
-| Key | Purpose |
-|-----|---------|
-| `easy-enroll-auth` | Current logged-in user session |
-| `easy-enroll:{userId}:enrollment` | Current term enrolled courses |
-| `easy-enroll:{userId}:events` | Personal calendar events |
-| `easy-enroll:{userId}:plans` | All saved plans by term |
-| `easy-enroll:{userId}:profile` | User profile data (name, avatar, etc.) |
-| `easy-enroll:{userId}:settings` | User preferences |
-
-**Note:** Data persists only for the current browser. Clearing browser cache will delete all saved data.
-
-## HCI Principles Applied
-
-EasyEnroll was built with these HCI principles in mind:
-
-1. **Visibility of System State** — Calendar shows enrolled vs. planned; conflict count displays immediately
-2. **Match Between System & Real World** — Uses familiar calendar metaphors; 12-hour time format
-3. **Error Prevention** — Credit limit warnings; conflict toast alerts before adding overlapping courses
-4. **Recovery from Errors** — Toast actions can undo recent additions; dirty state warning before losing data
-5. **Accessibility** — ARIA labels, keyboard navigation, high contrast color options
-6. **Learnability** — Onboarding modals; in-app help tips; consistent UI patterns
-
-## Future Enhancements
-
-Potential features for future phases:
-
-- [ ] Real backend API integration (replace mock data)
-- [ ] User role variation (advisor, registrar views)
-- [ ] Waitlist management
-- [ ] Prerequisite enforcement
-- [ ] Semester GPA calculator
-- [ ] Export to PDF
-- [ ] Multi-language support
 
 ## Troubleshooting
 
-### Dev server won't start
+### Dev server will not start
+
 ```bash
-# Clear node_modules and reinstall
-rm -r node_modules package-lock.json
 npm install
 npm run dev
 ```
 
-### Data not persisting
-- Check browser localStorage is enabled (not in private/incognito mode)
-- Clear browser cache if corrupted data: `localStorage.clear()` in console
-- Open DevTools (F12) → Application → Local Storage to inspect stored keys
+If dependencies are corrupted, delete `node_modules` and reinstall using PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force node_modules
+Remove-Item -Force package-lock.json
+npm install
+```
+
+### Data is not persisting
+
+- Make sure browser localStorage is enabled
+- Avoid private/incognito mode if data is disappearing
+- Clear localStorage from browser DevTools if saved data becomes corrupted
 
 ### Linting errors
+
 ```bash
 npm run lint
 ```
 
-## Testing
+## Submission Checklist
 
-This prototype does not include a dedicated test suite. If you want to add tests, consider using `vitest` or `jest` for unit tests and `playwright` or `cypress` for end-to-end flows.
+- ✅ Project structure clearly documented
+- ✅ Major components and their responsibilities described
+- ✅ Libraries and frameworks listed with rationale
+- ✅ Instructions for running the code (install, dev, build, lint)
+- ✅ Modular design demonstrated through file organization
+- ✅ Meaningful naming conventions applied throughout
+- ✅ Consistent formatting and style (ESLint enforced)
+- ✅ Appropriate comments on complex logic
+- ✅ Good software engineering practices evident in code structure
 
-## Contributing
+## Note
 
-Contributions are welcome for improving accessibility, UX flows, or adding real backend integration. To contribute:
-
-1. Fork the repository and create a topic branch.
-2. Run `npm install` and make changes locally.
-3. Ensure linting passes: `npm run lint`.
-4. Open a pull request with a short description of changes.
-
-## Contact
-
-For questions about this project, contact the original author or the course instructor listed in project materials.
-
-## License & Credits
-
-This is an academic project for **CS 4063 Human-Computer Interaction** at the University of Oklahoma.
-
-Built with React, Vite, and a lot of iteration on usability testing.
+This is an academic prototype, so it uses mock data instead of a live backend, given true SSO api integration requires a contract with the institution's identity provider. That choice keeps the code focused on user experience, interaction design, and scheduling logic.
