@@ -31,6 +31,7 @@ EasyEnroll/
 │   ├── main.jsx                     (React entry point)
 │   ├── index.css                    (Global styles and reset)
 │   ├── components/
+│   │   ├── AppSurfaces.jsx          (Reusable UI shells and modals)
 │   │   ├── TimeGridCalendar.jsx     (Time-grid calendar renderer)
 │   │   └── ToastStack.jsx           (Toast notification system)
 │   ├── data/
@@ -108,6 +109,7 @@ npm run build
 ```
 
 ### Preview the Build
+
 ```bash
 npm run preview
 ```
@@ -155,6 +157,15 @@ The codebase follows modular design principles to maximize clarity and maintaina
 ### App.jsx
 
 Main application container and state coordinator. It handles authentication, enrollment, planning, settings, notifications, and calendar data.
+
+### AppSurfaces.jsx
+
+Contains reusable UI shell components extracted for maintainability:
+- **LoginPage** — Mock SSO selector with user dropdown and login form
+- **Modal** — Accessible dialog wrapper with focus management and keyboard navigation
+- **HelpTipsList** — Static help tips and keyboard shortcuts reference
+- **PlanningConflictCard** — Displays course-course and course-event time conflicts
+- **TourOverlay** — Guided tour with spotlight highlights and step navigation
 
 ### TimeGridCalendar.jsx
 
@@ -267,18 +278,6 @@ npm install
 ```bash
 npm run lint
 ```
-
-## Submission Checklist
-
-- ✅ Project structure clearly documented
-- ✅ Major components and their responsibilities described
-- ✅ Libraries and frameworks listed with rationale
-- ✅ Instructions for running the code (install, dev, build, lint)
-- ✅ Modular design demonstrated through file organization
-- ✅ Meaningful naming conventions applied throughout
-- ✅ Consistent formatting and style (ESLint enforced)
-- ✅ Appropriate comments on complex logic
-- ✅ Good software engineering practices evident in code structure
 
 ## Note
 
