@@ -15,7 +15,7 @@ EasyEnroll is a frontend-only React application that helps students search for c
 - 🔍 Course catalog search with filtering by department, seat status, and degree requirements
 - ✅ Enrollment validation with real-time conflict detection
 - 📋 Planning mode for drafting and comparing future-term schedules
-- 📅 Time-grid calendar with Sun–Sat schedule visualization
+- 📅 Time-grid calendar with Mon–Fri schedule visualization
 - 📤 Schedule pop-out and export as `.ics` files for calendar apps (Google Calendar, Outlook, etc.)
 - ♿ Accessibility features (ARIA labels, keyboard navigation, high-contrast mode, reduced motion)
 - ⚠️ Toast notifications for user feedback and error handling
