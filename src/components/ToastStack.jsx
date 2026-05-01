@@ -1,14 +1,17 @@
+// Small toast notification system (hook + container) for transient app messages
 import { useCallback, useRef, useState } from "react"
 
 const DURATION_MS = 4500
 
 /**
+ * A hook for managing toasts.
  * @returns {object} toasts, pushToast(type, message, action?), dismiss, ToastContainer
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
   const timers = useRef(new Map())
 
+  // Dismiss a toast and clear any associated timer
   const dismiss = useCallback((id) => {
     const t = timers.current.get(id)
     if (t) {
@@ -18,6 +21,7 @@ export function useToast() {
     setToasts((prev) => prev.filter((x) => x.id !== id))
   }, [])
 
+  // Push a new toast and schedule automatic dismissal
   const pushToast = useCallback(
     (type, message, action) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -39,6 +43,7 @@ export function useToast() {
     [dismiss],
   )
 
+  // Component: renders active toasts; returned by the hook as ToastContainer
   const ToastContainer = useCallback(() => {
     return (
       <div className="toast-stack" aria-live="polite">

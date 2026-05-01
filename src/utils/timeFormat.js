@@ -1,4 +1,4 @@
-/** 24h "HH:MM" → "h:mm AM/PM" for display. */
+// 24h "HH:MM" → "h:mm AM/PM" for display given a 24-hour time string
 export function formatTime12h(twentyFour) {
   if (!twentyFour || typeof twentyFour !== "string") {
     return ""
@@ -17,6 +17,7 @@ export function formatTime12h(twentyFour) {
   return `${h}:${min} ${ap}`
 }
 
+// 24h "HH:MM" → "h:mm AM/PM" for display given start and end times
 export function formatTimeRange12h(start24, end24) {
   return `${formatTime12h(start24)} – ${formatTime12h(end24)}`
 }

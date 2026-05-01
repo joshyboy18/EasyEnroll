@@ -1,9 +1,13 @@
+/*
+ * Main application component
+ * - Imports all necessary dependencies and initializes the application
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
-import easyEnrollLoginLogo from "../EasyEnroll.png"
 import easyEnrollLogoIcon from "../EasyEnrollIcon.png"
 import easyEnrollLogoText from "../EasyEnrollText.png"
 import { TimeGridCalendar } from "./components/TimeGridCalendar.jsx"
+import { HelpTipsList, LoginPage, Modal, PlanningConflictCard, TourOverlay } from "./components/AppSurfaces.jsx"
 import { useToast } from "./components/ToastStack.jsx"
 import { loginWithSso } from "./utils/auth"
 import { buildTimeGridBlocks, getViewWindowFromBlocks, popoutHtmlForGrid } from "./utils/calendarLayout.js"
@@ -44,11 +48,11 @@ import { attachOpaqueCourseDrag, endCourseCardDrag } from "./utils/courseDrag.js
 import { buildSemesterScheduleIcs, buildSingleCourseIcs, buildWeekScheduleIcs, downloadIcsFile } from "./utils/ics.js"
 
 const MAX_CREDITS = 19
-/** Shown when a planning add would exceed the credit cap (mirrors enrollment policy). */
+// Cap message shown when a planning add would exceed the credit cap (mirrors enrollment policy)
 const PLANNING_CREDIT_CAP_MESSAGE = `Plans are limited to ${MAX_CREDITS} credit hours without academic advisor approval. To take more, speak with your advisor.`
 const PLANNING_CONFLICTS_INITIAL = 8
 const SCHOOL_EMAIL_DOMAIN = "@school.edu"
-
+// Descriptive labels for each high-level app view used for accessibility
 const VIEW_WAYFINDING = {
   dashboard: "Enrollment — search the catalog, manage your term, and see your week.",
   planning:
@@ -57,6 +61,7 @@ const VIEW_WAYFINDING = {
   settings: "Settings — display, alerts, and accessibility for the planner.",
 }
 
+// Guided tour steps for onboarding new users; used by the TourOverlay component
 const APP_TOUR_STEPS = [
   {
     id: "nav",
@@ -158,11 +163,11 @@ const APP_TOUR_STEPS = [
 
 const LS_ONBOARD_ENROLLMENT = "easyenroll.dismissOnboarding.enrollment"
 const LS_ONBOARD_PLANNING = "easyenroll.dismissOnboarding.planning"
-/** @deprecated kept in sync when enrollment onboarding is dismissed */
+// @deprecated kept in sync when enrollment onboarding is dismissed
 const LS_DISMISS_WELCOME_LEGACY = "easyenroll.dismissWelcome"
 const LS_TOUR_ENROLLMENT = "easyenroll.tour.enrollment"
 const LS_TOUR_WELCOME = "easyenroll.tour.welcome"
-
+// Helper: read a boolean-style flag from localStorage (true when stored as "1")
 function readLocalFlag(key) {
   if (typeof localStorage === "undefined") {
     return false
@@ -170,6 +175,7 @@ function readLocalFlag(key) {
   return localStorage.getItem(key) === "1"
 }
 
+// Helper: set a boolean-style flag in localStorage (stores "1")
 function writeLocalFlag(key) {
   try {
     localStorage.setItem(key, "1")
@@ -178,6 +184,7 @@ function writeLocalFlag(key) {
   }
 }
 
+// Returns whether the enrollment onboarding notices have already been dismissed
 function enrollmentOnboardingInitiallyDismissed() {
   if (typeof localStorage === "undefined") {
     return false
@@ -188,6 +195,7 @@ function enrollmentOnboardingInitiallyDismissed() {
   return localStorage.getItem(LS_DISMISS_WELCOME_LEGACY) === "1"
 }
 
+// Persist user dismissal of the enrollment onboarding notices
 function persistEnrollmentOnboardingDismissed() {
   try {
     localStorage.setItem(LS_ONBOARD_ENROLLMENT, "1")
@@ -197,10 +205,12 @@ function persistEnrollmentOnboardingDismissed() {
   }
 }
 
+// Returns whether the planning onboarding notices have already been dismissed
 function planningOnboardingInitiallyDismissed() {
   return typeof localStorage !== "undefined" && localStorage.getItem(LS_ONBOARD_PLANNING) === "1"
 }
 
+// Persist user dismissal of the planning onboarding notices
 function persistPlanningOnboardingDismissed() {
   try {
     localStorage.setItem(LS_ONBOARD_PLANNING, "1")
@@ -209,24 +219,28 @@ function persistPlanningOnboardingDismissed() {
   }
 }
 
+// Returns whether the enrollment tour was completed (local flag)
 function enrollmentTourInitiallyCompleted() {
   return readLocalFlag(LS_TOUR_ENROLLMENT)
 }
 
+// Mark the enrollment tour as completed in localStorage
 function persistEnrollmentTourCompleted() {
   writeLocalFlag(LS_TOUR_ENROLLMENT)
 }
 
+// Returns whether the welcome tour/intro was dismissed previously
 function tourWelcomeInitiallyDismissed() {
   return readLocalFlag(LS_TOUR_WELCOME)
 }
 
+// Persist that the welcome intro has been dismissed
 function persistTourWelcomeDismissed() {
   writeLocalFlag(LS_TOUR_WELCOME)
 }
 
 const EVENT_COLOR_PRESETS = ["#b8e1ff", "#ffd6e8", "#d8f3dc", "#ffe8b6", "#e2d4ff", "#cfeff7"]
-
+// Default user-adjustable settings for calendar, alerts, and accessibility
 const defaultSettings = {
   compactCalendar: true,
   showConflictAlerts: true,
@@ -239,6 +253,7 @@ const defaultSettings = {
   compactCatalog: true,
 }
 
+// Merge stored settings with defaults, ensuring backwards-compatible keys
 function mergeSettingsWithDefaults(stored) {
   if (!stored || typeof stored !== "object") {
     return { ...defaultSettings }
@@ -246,6 +261,7 @@ function mergeSettingsWithDefaults(stored) {
   return { ...defaultSettings, ...stored }
 }
 
+// Mock recurring personal events for demo purposes
 const defaultEvents = [
   {
     id: "ev-work",
@@ -257,8 +273,9 @@ const defaultEvents = [
     description: "Evening shift on campus.",
   },
 ]
-/* eventForm.details maps to Event.description in storage */
+// eventForm.details maps to Event.description in storage
 
+// Normalize event with default color and description for consistency
 function normalizeEventEntry(event) {
   return {
     ...event,
@@ -267,11 +284,13 @@ function normalizeEventEntry(event) {
   }
 }
 
+// Create initial profile from user email and defaults
 function defaultProfileFromUser(user) {
   const local = user.email.split("@")[0] || "student"
   return { name: user.name, emailLocal: local, avatarDataUrl: "" }
 }
 
+// Calculate the next enrollment term label (Spring→Fall or Fall→next Spring)
 function getNextSemesterLabel(termLabel) {
   const match = String(termLabel).match(/^(Spring|Fall)\s+(\d{4})$/i)
   if (!match) {
@@ -289,12 +308,14 @@ function getNextSemesterLabel(termLabel) {
   return "Next semester"
 }
 
+// Return academic class standing label (Freshman–Senior) based on class year
 function getClassStandingLabel(classYear) {
   const standings = ["Freshman", "Sophomore", "Junior", "Senior"]
   const index = Math.min(Math.max(Number(classYear) || 1, 1), standings.length) - 1
   return standings[index]
 }
 
+// Generate mock registration status data for the profile/account view
 function getRegistrationSnapshot(classYear) {
   const earnedHoursByClassYear = {
     1: { institutional: 15, transfer: 0 },
@@ -314,6 +335,7 @@ function getRegistrationSnapshot(classYear) {
   }
 }
 
+// Aggregate student academic info and registrar data for profile display
 function getStudentInformationSnapshot(user) {
   // 1. Level Calculation
   const levelByClassYear = {
@@ -402,6 +424,7 @@ function getStudentInformationSnapshot(user) {
   };
 }
 
+// Format course summary metadata (seats, waitlist, credits) for display
 function formatCourseMeta(course) {
   const seatText =
     course.seatsAvailable > 0
@@ -412,6 +435,7 @@ function formatCourseMeta(course) {
   return `${course.id} | ${course.professor} | ${course.credits} credits | ${seatText}`
 }
 
+// Presentational component displaying a single course card with metadata and add/enroll action
 function CourseCard({
   course,
   courseMap,
@@ -495,450 +519,8 @@ function CourseCard({
     </article>
   )
 }
-function PlanningConflictCard({ conflict, courses }) {
-  if (conflict.type === "course") {
-    const ca = courses.find((c) => c.id === conflict.a)
-    const cb = courses.find((c) => c.id === conflict.b)
-    return (
-      <article
-        className="planning-conflict-card planning-conflict-card--course"
-        aria-label={`Time overlap: ${conflict.a} and ${conflict.b}`}
-      >
-        <span className="planning-conflict-card__kind">Class vs class</span>
-        <div className="planning-conflict-card__pair">
-          <div className="planning-conflict-card__side">
-            <span className="planning-conflict-card__code">{conflict.a}</span>
-            <span className="planning-conflict-card__title">{ca?.title ?? ""}</span>
-          </div>
-          <span className="planning-conflict-card__vs" aria-hidden="true">
-            overlaps
-          </span>
-          <div className="planning-conflict-card__side">
-            <span className="planning-conflict-card__code">{conflict.b}</span>
-            <span className="planning-conflict-card__title">{cb?.title ?? ""}</span>
-          </div>
-        </div>
-      </article>
-    )
-  }
-  const ca = courses.find((c) => c.id === conflict.a)
-  return (
-    <article
-      className="planning-conflict-card planning-conflict-card--event"
-      aria-label={`Time overlap: ${conflict.a} with event ${conflict.bTitle || conflict.b}`}
-    >
-      <span className="planning-conflict-card__kind">Class vs event</span>
-      <div className="planning-conflict-card__pair planning-conflict-card__pair--event">
-        <div className="planning-conflict-card__side">
-          <span className="planning-conflict-card__code">{conflict.a}</span>
-          <span className="planning-conflict-card__title">{ca?.title ?? ""}</span>
-        </div>
-        <span className="planning-conflict-card__vs" aria-hidden="true">
-          overlaps
-        </span>
-        <div className="planning-conflict-card__side planning-conflict-card__side--event">
-          <span className="planning-conflict-card__code planning-conflict-card__code--event">
-            {conflict.bTitle || conflict.b}
-          </span>
-          <span className="planning-conflict-card__meta">Personal weekly event</span>
-        </div>
-      </div>
-    </article>
-  )
-}
 
-function HelpTipsList() {
-  return (
-    <ul className="help-tips">
-      <li>
-        Open <strong>Settings</strong> for this list anytime; the right column is dedicated to keyboard and tips.
-      </li>
-      <li>
-        Press <kbd>Esc</kbd> to close any dialog, including course details and import summary.
-      </li>
-      <li>
-        Use the top navigation: <strong>Enrollment</strong> to search and enroll, <strong>Planning</strong> to try
-        alternate course sets, <strong>Settings</strong> for the calendar view and high contrast.
-      </li>
-      <li>
-        Download a <strong>week</strong> file (Enrollment → weekly calendar) to check your plan on a phone or desktop
-        calendar app.
-      </li>
-    </ul>
-  )
-}
-
-function Modal({ title, children, onClose, actions }) {
-  const panelRef = useRef(null)
-  const prevActiveRef = useRef(null)
-  useEffect(() => {
-    prevActiveRef.current = document.activeElement
-    const root = panelRef.current
-    const t = setTimeout(() => {
-      if (!root) {
-        return
-      }
-      const first = root.querySelector(
-        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
-      if (first instanceof HTMLElement) {
-        first.focus()
-      }
-    }, 0)
-    const onKey = (e) => {
-      if (e.key !== "Tab" || !root) {
-        return
-      }
-      const list = [
-        ...root.querySelectorAll(
-          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ].filter((el) => el.offsetParent !== null)
-      if (list.length === 0) {
-        return
-      }
-      const first = list[0]
-      const last = list[list.length - 1]
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        }
-      } else if (document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener("keydown", onKey, true)
-    return () => {
-      clearTimeout(t)
-      document.removeEventListener("keydown", onKey, true)
-      if (typeof prevActiveRef.current?.focus === "function") {
-        prevActiveRef.current.focus()
-      }
-    }
-  }, [title])
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section
-        ref={panelRef}
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="modal__header">
-          <h3>{title}</h3>
-          <button className="btn btn--subtle" type="button" onClick={onClose}>
-            Close
-          </button>
-        </header>
-        <div className="modal__body">{children}</div>
-        {actions && <footer className="modal__actions">{actions}</footer>}
-      </section>
-    </div>
-  )
-}
-
-function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onClose }) {
-  const [targetRect, setTargetRect] = useState(null)
-  const [tooltipPos, setTooltipPos] = useState(() => ({
-    top: typeof window !== "undefined" ? Math.max(80, window.innerHeight * 0.28) : 80,
-    left: typeof window !== "undefined" ? Math.max(24, window.innerWidth * 0.5 - 160) : 24,
-    placement: "center",
-  }))
-  const tooltipRef = useRef(null)
-
-  useEffect(() => {
-    if (!step) {
-      return
-    }
-    let activeTarget = null
-    let rafId = 0
-    let observer = null
-    let released = false
-    let stopListening = () => {}
-
-    const rectChanged = (a, b) => {
-      if (!a || !b) {
-        return true
-      }
-      const threshold = 1
-      return (
-        Math.abs(a.top - b.top) > threshold ||
-        Math.abs(a.left - b.left) > threshold ||
-        Math.abs(a.width - b.width) > threshold ||
-        Math.abs(a.height - b.height) > threshold
-      )
-    }
-
-    const setRectIfChanged = (nextRect) => {
-      if (!nextRect || nextRect.width < 6 || nextRect.height < 6) {
-        return
-      }
-      setTargetRect((prev) => {
-        return rectChanged(prev, nextRect) ? nextRect : prev
-      })
-    }
-
-    const bindTarget = (target) => {
-      activeTarget = target
-      const update = () => {
-        if (!activeTarget) {
-          return
-        }
-        setRectIfChanged(activeTarget.getBoundingClientRect())
-      }
-      update()
-      if (typeof target.scrollIntoView === "function") {
-        // Use instant scroll for tour targeting so overlay moves once to final position.
-        target.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
-      }
-      window.addEventListener("resize", update)
-      window.addEventListener("scroll", update, true)
-      stopListening = () => {
-        window.removeEventListener("resize", update)
-        window.removeEventListener("scroll", update, true)
-      }
-    }
-
-    const resolveTarget = () => {
-      const nextTarget = document.querySelector(step.target)
-      if (!nextTarget) {
-        return false
-      }
-      if (nextTarget !== activeTarget) {
-        stopListening()
-        bindTarget(nextTarget)
-      } else {
-        setRectIfChanged(nextTarget.getBoundingClientRect())
-      }
-      return true
-    }
-
-    const startedAt = performance.now()
-    const pollForTarget = () => {
-      if (released) {
-        return
-      }
-      if (resolveTarget()) {
-        return
-      }
-      if (performance.now() - startedAt > 1400) {
-        return
-      }
-      rafId = window.requestAnimationFrame(pollForTarget)
-    }
-
-    if (!resolveTarget()) {
-      rafId = window.requestAnimationFrame(pollForTarget)
-      observer = new MutationObserver(() => {
-        resolveTarget()
-      })
-      observer.observe(document.body, { childList: true, subtree: true })
-    }
-
-    return () => {
-      released = true
-      if (rafId) {
-        window.cancelAnimationFrame(rafId)
-      }
-      if (observer) {
-        observer.disconnect()
-      }
-      stopListening()
-    }
-  }, [step])
-
-  useEffect(() => {
-    const tooltip = tooltipRef.current
-    if (!tooltip) {
-      return
-    }
-    if (!targetRect) {
-      return
-    }
-    const tooltipRect = tooltip.getBoundingClientRect()
-    const spacing = 16
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const preferred = step?.placement || "bottom"
-
-    const fits = {
-      top: targetRect.top >= tooltipRect.height + spacing,
-      bottom: vh - targetRect.bottom >= tooltipRect.height + spacing,
-      left: targetRect.left >= tooltipRect.width + spacing,
-      right: vw - targetRect.right >= tooltipRect.width + spacing,
-    }
-
-    const available = {
-      top: targetRect.top,
-      bottom: vh - targetRect.bottom,
-      left: targetRect.left,
-      right: vw - targetRect.right,
-    }
-
-    let placement = preferred
-    if (!fits[placement]) {
-      const ordered = ["bottom", "right", "left", "top"]
-      placement = ordered.find((p) => fits[p]) || ordered.sort((a, b) => available[b] - available[a])[0]
-    }
-
-    let top = targetRect.bottom + spacing
-    let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2
-
-    if (placement === "top") {
-      top = targetRect.top - spacing - tooltipRect.height
-    }
-    if (placement === "left") {
-      left = targetRect.left - spacing - tooltipRect.width
-      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
-    }
-    if (placement === "right") {
-      left = targetRect.right + spacing
-      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2
-    }
-
-    top = Math.min(Math.max(top, spacing), vh - tooltipRect.height - spacing)
-    left = Math.min(Math.max(left, spacing), vw - tooltipRect.width - spacing)
-    setTooltipPos({ top, left, placement })
-  }, [step, targetRect])
-
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault()
-        onClose()
-      }
-    }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [onClose])
-
-  useEffect(() => {
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = prevOverflow
-    }
-  }, [])
-
-  if (!step) {
-    return null
-  }
-
-  const progress = totalSteps > 0 ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0
-  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
-  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0
-  const spotlightRect = targetRect
-    ? {
-        top: Math.max(0, targetRect.top - 8),
-        left: Math.max(0, targetRect.left - 8),
-        width: Math.max(0, targetRect.width + 16),
-        height: Math.max(0, targetRect.height + 16),
-      }
-    : null
-
-  const overlayMasks = spotlightRect
-    ? [
-        { top: 0, left: 0, width: viewportWidth, height: spotlightRect.top },
-        { top: spotlightRect.top, left: 0, width: spotlightRect.left, height: spotlightRect.height },
-        {
-          top: spotlightRect.top,
-          left: spotlightRect.left + spotlightRect.width,
-          width: Math.max(0, viewportWidth - (spotlightRect.left + spotlightRect.width)),
-          height: spotlightRect.height,
-        },
-        {
-          top: spotlightRect.top + spotlightRect.height,
-          left: 0,
-          width: viewportWidth,
-          height: Math.max(0, viewportHeight - (spotlightRect.top + spotlightRect.height)),
-        },
-      ]
-    : [{ top: 0, left: 0, width: viewportWidth, height: viewportHeight }]
-
-  return (
-    <div className="tour-overlay" role="dialog" aria-modal="true" aria-label={step.title}>
-      {overlayMasks.map((mask, index) => (
-        <div
-          key={`mask-${index}`}
-          className="tour-overlay__mask"
-          style={{ top: mask.top, left: mask.left, width: mask.width, height: mask.height }}
-        />
-      ))}
-      {spotlightRect && <div className="tour-highlight" style={spotlightRect} />}
-      <div
-        ref={tooltipRef}
-        className={`tour-tooltip tour-tooltip--${tooltipPos.placement}`}
-        style={{ top: tooltipPos.top, left: tooltipPos.left }}
-      >
-        <div className="tour-progress">
-          <div className="tour-progress__header">
-            <span>
-              Step {stepIndex + 1} of {totalSteps}
-            </span>
-            <span>{progress}%</span>
-          </div>
-          <div className="tour-progress__bar" aria-hidden="true">
-            <span style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-        <h3 className="tour-tooltip__title">{step.title}</h3>
-        <p className="tour-tooltip__body">{step.body}</p>
-        <div className="tour-tooltip__actions">
-          <button className="btn btn--subtle" type="button" onClick={onClose}>
-            Skip tour
-          </button>
-          <div className="tour-tooltip__nav">
-            <button className="btn btn--subtle" type="button" onClick={onPrev} disabled={stepIndex === 0}>
-              Back
-            </button>
-            <button className="btn btn--primary" type="button" onClick={onNext}>
-              {stepIndex + 1 === totalSteps ? "Finish" : "Next"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LoginPage({
-  ssoUserId,
-  setSsoUserId,
-  onSsoLogin,
-  error,
-}) {
-  return (
-    <main className="login-page">
-      <section className="login-card">
-        <img className="login-logo" src={easyEnrollLoginLogo} alt="Easy Enroll" />
-        <p align="center" style={{ color: "#333", fontSize: "1.25em", margin: "0em 0em 0em 0em", fontWeight: "bold" }}>
-            Welcome!
-          </p>
-        <label>
-          <p align="center" style={{ color: "#949494", fontStyle: "italic", margin: "0em 0em 3em 0em" }}>
-            Login to Your University Account to Enroll
-          </p>
-          <select value={ssoUserId} onChange={(event) => setSsoUserId(event.target.value)}>
-            {mockUsers.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="btn btn--primary" type="button" onClick={onSsoLogin}>
-          Sign In With University SSO
-        </button>
-        {error && <p className="error-text">{error}</p>}
-      </section>
-    </main>
-  )
-}
-
+// Main application component orchestrating state, views, modals, and features
 function App() {
   const initialSession = loadAuthSession()
   const initialUser = mockUsers.find((entry) => entry.id === initialSession?.userId) || null
@@ -1146,7 +728,10 @@ function App() {
             avatarDataUrl: rawProfile.avatarDataUrl || "",
           }
         : defaultProfileFromUser(user)
-    const nextPlans = loadUserBucket(user.id, "plans", [])
+    const nextPlans = loadUserBucket(user.id, "plans", []).map((plan) => ({
+      ...plan,
+      events: Array.isArray(plan.events) ? plan.events.map(normalizeEventEntry) : [],
+    }))
 
     setEnrolledIds(nextEnrolled)
     setEvents(nextEvents)
@@ -1453,7 +1038,8 @@ function App() {
     }
     const enr = new Set(enrolledIds)
     const plannedOnly = plannedCourses.filter((c) => !enr.has(c.id))
-    return buildTimeGridBlocks({ enrolledCourses, events, plannedOnly })
+    const planEvents = activePlan.events || []
+    return buildTimeGridBlocks({ enrolledCourses, events: planEvents, plannedOnly })
   }, [enrolledCourses, events, activePlan, plannedCourses, enrolledIds])
 
   const dashboardViewWindow = useMemo(
@@ -1702,38 +1288,78 @@ function App() {
     }
     const color =
       eventForm.useCustomColor && eventForm.color ? eventForm.color : eventForm.color || EVENT_COLOR_PRESETS[0]
+    
+    const isPlanningMode = activeView === "planning"
+    const isEditingPlanEvent = isPlanningMode && activePlan
+    
     if (mode === "add") {
-      setEvents((prev) => [
-        ...prev,
-        normalizeEventEntry({
-          id: `ev-${Date.now()}`,
-          title: eventForm.title.trim(),
-          description: eventForm.details.trim(),
-          days: eventForm.days,
-          start: eventForm.start,
-          end: eventForm.end,
-          color,
-        }),
-      ])
+      const newEvent = normalizeEventEntry({
+        id: `ev-${Date.now()}`,
+        title: eventForm.title.trim(),
+        description: eventForm.details.trim(),
+        days: eventForm.days,
+        start: eventForm.start,
+        end: eventForm.end,
+        color,
+      })
+      
+      if (isEditingPlanEvent) {
+        setPlans((prev) =>
+          prev.map((plan) =>
+            plan.id === activePlan.id
+              ? { ...plan, events: [...(plan.events || []), newEvent] }
+              : plan,
+          ),
+        )
+      } else {
+        setEvents((prev) => [...prev, newEvent])
+      }
+      
       if (settings.showReminderAlerts) {
         pushToast("success", "Event added to your calendar.")
       }
     } else if (editId) {
-      setEvents((prev) =>
-        prev.map((ev) =>
-          ev.id === editId
-            ? normalizeEventEntry({
-                ...ev,
-                title: eventForm.title.trim(),
-                description: eventForm.details.trim(),
-                days: eventForm.days,
-                start: eventForm.start,
-                end: eventForm.end,
-                color,
-              })
-            : ev,
-        ),
-      )
+      if (isEditingPlanEvent) {
+        setPlans((prev) =>
+          prev.map((plan) =>
+            plan.id === activePlan.id
+              ? {
+                  ...plan,
+                  events: (plan.events || []).map((ev) =>
+                    ev.id === editId
+                      ? normalizeEventEntry({
+                          ...ev,
+                          title: eventForm.title.trim(),
+                          description: eventForm.details.trim(),
+                          days: eventForm.days,
+                          start: eventForm.start,
+                          end: eventForm.end,
+                          color,
+                        })
+                      : ev,
+                  ),
+                }
+              : plan,
+          ),
+        )
+      } else {
+        setEvents((prev) =>
+          prev.map((ev) =>
+            ev.id === editId
+              ? normalizeEventEntry({
+                  ...ev,
+                  title: eventForm.title.trim(),
+                  description: eventForm.details.trim(),
+                  days: eventForm.days,
+                  start: eventForm.start,
+                  end: eventForm.end,
+                  color,
+                })
+              : ev,
+          ),
+        )
+      }
+      
       if (settings.showReminderAlerts) {
         pushToast("success", "Event updated.")
       }
@@ -1751,11 +1377,29 @@ function App() {
   }
 
   const removeEventById = (eventId) => {
-    const ev = events.find((e) => e.id === eventId)
-    setEvents((prev) => prev.filter((event) => event.id !== eventId))
-    setEventModal(null)
-    if (settings.showReminderAlerts) {
-      pushToast("success", ev ? `"${ev.title}" removed from your calendar.` : "Event removed from your calendar.")
+    const isPlanningMode = activeView === "planning"
+    const isRemovingPlanEvent = isPlanningMode && activePlan
+    
+    if (isRemovingPlanEvent) {
+      const ev = activePlan.events?.find((e) => e.id === eventId)
+      setPlans((prev) =>
+        prev.map((plan) =>
+          plan.id === activePlan.id
+            ? { ...plan, events: (plan.events || []).filter((event) => event.id !== eventId) }
+            : plan,
+        ),
+      )
+      setEventModal(null)
+      if (settings.showReminderAlerts) {
+        pushToast("success", ev ? `"${ev.title}" removed from your calendar.` : "Event removed from your calendar.")
+      }
+    } else {
+      const ev = events.find((e) => e.id === eventId)
+      setEvents((prev) => prev.filter((event) => event.id !== eventId))
+      setEventModal(null)
+      if (settings.showReminderAlerts) {
+        pushToast("success", ev ? `"${ev.title}" removed from your calendar.` : "Event removed from your calendar.")
+      }
     }
   }
 
@@ -1793,7 +1437,8 @@ function App() {
 
     const other = plannedCourses
     const classHit = hasCourseConflict(course, other)
-    const evHits = getEventConflicts(course, events)
+    const planEvents = activePlan?.events || []
+    const evHits = getEventConflicts(course, planEvents)
     if (classHit || evHits.length > 0) {
       const parts = []
       if (classHit) {
@@ -1841,7 +1486,7 @@ function App() {
 
   const createPlan = (name) => {
     const planName = (name && name.trim()) || `Plan ${plans.length + 1}`
-    const newPlan = { id: `plan-${Date.now()}`, name: planName, courseIds: [] }
+    const newPlan = { id: `plan-${Date.now()}`, name: planName, courseIds: [], events: [] }
     setPlans((prev) => [...prev, newPlan])
     setActivePlanId(newPlan.id)
     pushToast("success", `Created "${planName}". Add courses in the studio.`)
@@ -1873,7 +1518,7 @@ function App() {
         course,
         courses.filter((entry) => workingIds.includes(entry.id)),
       )
-      const eventConflict = getEventConflicts(course, events).length > 0
+      const eventConflict = getEventConflicts(course, activePlan?.events || []).length > 0
 
       if (duplicate || missingPrereqs.length > 0 || seatBlocked || creditBlocked || classConflict || eventConflict) {
         const reason = duplicate
@@ -1951,6 +1596,10 @@ function App() {
           if (typeof p?.id !== "string" || typeof p?.name !== "string" || !Array.isArray(p?.courseIds)) {
             throw new Error("invalid plan")
           }
+          // Ensure imported plans have an events array (for backward compatibility)
+          if (!Array.isArray(p.events)) {
+            p.events = []
+          }
         }
         setPlans(data)
         setLastSavedPlansJson(JSON.stringify(data))
@@ -1968,8 +1617,11 @@ function App() {
   }
 
   const planningConflicts = useMemo(
-    () => detectPlanConflicts(planningGridCourses, events),
-    [planningGridCourses, events],
+    () => {
+      const planEvents = activePlan?.events || []
+      return detectPlanConflicts(planningGridCourses, planEvents)
+    },
+    [planningGridCourses, activePlan],
   )
 
   const sortedPlanningConflicts = useMemo(() => {
@@ -4015,5 +3667,5 @@ function App() {
   )
 }
 
+// Export App as the default module
 export default App
-

@@ -1,21 +1,27 @@
+// Utilities for schedule conflict detection and time conversions
 import { formatTimeRange12h } from "./timeFormat.js"
 
+// Canonical weekday names used across calendar utilities
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
+// Convert a HH:MM time string into minutes since midnight
 function toMinutes(time) {
   const [hour, minute] = time.split(":").map(Number)
   return hour * 60 + minute
 }
 
+// Export utility for converting times to minutes
 export { toMinutes }
 
-/** Mon–Fri columns in schedule grids (typical class week). */
+// Mon–Fri columns in schedule grids (typical class week)
 export const scheduleColumnDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
+// Helper: return true when two time intervals overlap
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd
 }
 
+// Build a readable label for a course's meeting times (used on course cards)
 export function meetingLabel(meetings) {
   return meetings
     .map((m) => {
@@ -26,6 +32,7 @@ export function meetingLabel(meetings) {
     .join(" | ")
 }
 
+// Determine whether the candidate course has a time conflict with any existing courses
 export function hasCourseConflict(candidate, existingCourses) {
   for (const existing of existingCourses) {
     for (const cm of candidate.meetingTimes) {
@@ -42,6 +49,7 @@ export function hasCourseConflict(candidate, existingCourses) {
   return null
 }
 
+// Return a list of personal weekly events that overlap the candidate course
 export function getEventConflicts(candidate, events) {
   const conflicts = []
   for (const event of events) {
@@ -87,9 +95,11 @@ export function detectPlanConflicts(planCourses, events) {
   return conflicts
 }
 
+// Group courses and personal events into buckets keyed by weekday for rendering
 export function groupScheduleByDay(courses, events) {
   const grouped = Object.fromEntries(days.map((day) => [day, []]))
 
+  // Add course meeting entries into per-day buckets
   for (const course of courses) {
     for (const meeting of course.meetingTimes) {
       grouped[meeting.day].push({
@@ -102,6 +112,7 @@ export function groupScheduleByDay(courses, events) {
     }
   }
 
+  // Add personal event entries into per-day buckets
   for (const event of events) {
     for (const day of event.days) {
       grouped[day].push({
@@ -114,11 +125,14 @@ export function groupScheduleByDay(courses, events) {
     }
   }
 
+  // Sort each day's items by start time for presentation
   for (const day of days) {
     grouped[day].sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
   }
 
+  // Return grouped schedule
   return grouped
 }
 
+// Exported alias: canonical list of weekdays
 export const weekDays = days

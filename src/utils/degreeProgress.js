@@ -1,12 +1,16 @@
+// Utilities for degree-sheet lookups and generating course recommendations
 import { degreeSheets } from "../data/degreeSheets"
 
+// Return display names for the provided program ids
 export function getProgramNames(programIds) {
   return programIds.map((id) => degreeSheets[id]?.name).filter(Boolean)
 }
 
+// Determine how a course counts toward each program (required or elective)
 export function getCourseDegreeMatches(courseId, programIds) {
   const labels = []
 
+  // Inspect each program's degree sheet to determine required/elective membership
   for (const id of programIds) {
     const sheet = degreeSheets[id]
     if (!sheet) {
@@ -23,10 +27,12 @@ export function getCourseDegreeMatches(courseId, programIds) {
     }
   }
 
+  // Return labels describing how the course counts toward each program
   return labels
 }
 
 /**
+ * Gets course recommendations aware of the student's academic year.
  * @param {number} classYear 1–4 (freshman–senior)
  */
 export function getYearAwareRecommendations(allCourses, enrolledCourses, programIds, classYear) {
@@ -72,6 +78,13 @@ export function getYearAwareRecommendations(allCourses, enrolledCourses, program
   return withYear
 }
 
+/**
+ * Gets course recommendations based on enrolled courses and program requirements.
+ * @param {*} allCourses 
+ * @param {*} enrolledCourses 
+ * @param {*} programIds 
+ * @returns 
+ */
 export function getRecommendations(allCourses, enrolledCourses, programIds) {
   const enrolledIds = new Set(enrolledCourses.map((course) => course.id))
   const courseMap = new Map(allCourses.map((course) => [course.id, course]))

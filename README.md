@@ -108,8 +108,6 @@ npm run build
 ```
 
 ### Preview the Build
-├── eslint.config.js
-├── README.md
 ```bash
 npm run preview
 ```

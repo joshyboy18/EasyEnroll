@@ -1,20 +1,23 @@
+// Time-grid calendar component renders a weekday grid and positioned blocks
 import { useEffect, useRef } from "react"
 import { formatHourGutterLabel, layoutOverlappingDayBlocks, PX_PER_HOUR } from "../utils/calendarLayout.js"
 import { textColorOnCourseBlock } from "../utils/courseColors.js"
 
 const MIN_IN_DAY = 24 * 60
 
+// Public component: renders calendar blocks across a set of weekdays
 export function TimeGridCalendar({
   blocks,
   days,
   onBlockClick,
   initialScrollHour = 0,
   className = "",
-  /** Minutes from midnight: top of the visible time axis (0 = show from midnight). */
+  // Minutes from midnight: top of the visible time axis (0 = show from midnight)
   viewStartMin = 0,
-  /** Minutes from midnight: bottom of the visible time axis (1440 = full day). */
+  // Minutes from midnight: bottom of the visible time axis (1440 = full day)
   viewEndMin = MIN_IN_DAY,
 }) {
+  // Keep a scrolling container ref so we can programmatically scroll the view
   const scrollRef = useRef(null)
   let viewStart = Math.max(0, Math.min(MIN_IN_DAY, viewStartMin))
   let viewEnd = Math.max(0, Math.min(MIN_IN_DAY, viewEndMin))
@@ -25,6 +28,7 @@ export function TimeGridCalendar({
   const totalH = ((viewEnd - viewStart) / 60) * PX_PER_HOUR
   const useFocal = viewStart > 0 || viewEnd < MIN_IN_DAY
 
+  // If an initial scroll hour is provided, scroll the container there on mount
   useEffect(() => {
     const el = scrollRef.current
     if (el && initialScrollHour > 0) {
@@ -32,16 +36,19 @@ export function TimeGridCalendar({
     }
   }, [initialScrollHour])
 
+  // Build the set of hourly slot anchors for the left gutter
   const timeSlots = []
   for (let t = viewStart; t < viewEnd; t += 60) {
     timeSlots.push(t)
   }
 
+  // Inline CSS variables used by the time-grid layout (hours -> px conversion)
   const wrapStyle = {
     "--px-per-hour": `${PX_PER_HOUR}px`,
     "--time-grid-total-px": `${totalH}px`,
   }
 
+  // Render the calendar grid (gutter + day columns + blocks)
   return (
     <div
       className={`time-grid-wrap ${useFocal ? "time-grid-wrap--focal" : ""} ${className}`.trim()}

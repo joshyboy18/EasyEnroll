@@ -1,4 +1,4 @@
-/** Pastel palette for calmer schedule blocks and theme consistency. */
+// Pastel palette for calmer schedule blocks and theme consistency
 const PALETTE = [
   "#f8c8dc",
   "#cde7ff",
@@ -14,6 +14,7 @@ const PALETTE = [
   "#d6e4ff",
 ]
 
+// Deterministic hash used to index into the palette for a stable color per id
 function hashId(str) {
   let h = 0
   for (let i = 0; i < str.length; i += 1) {
@@ -23,6 +24,7 @@ function hashId(str) {
   return Math.abs(h)
 }
 
+// Pick a pastel color for a course id (stable across reloads)
 export function colorForCourseId(courseId) {
   if (!courseId) {
     return PALETTE[0]
@@ -30,10 +32,12 @@ export function colorForCourseId(courseId) {
   return PALETTE[hashId(String(courseId)) % PALETTE.length]
 }
 
+// Return a readable text color for course blocks (contrasts with pastel backgrounds)
 export function textColorOnCourseBlock() {
   return "#1f2937"
 }
 
+// Convert a hex color to an rgba(...) string with the provided alpha value
 export function withAlpha(hex, a) {
   if (!hex || hex[0] !== "#" || (hex.length !== 7 && hex.length !== 4)) {
     return `rgba(248, 200, 220, ${a})`

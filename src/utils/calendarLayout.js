@@ -1,10 +1,12 @@
+// Calendar layout helpers: build renderable blocks, compute overlap layouts, and provide pop-out HTML
 import { colorForCourseId, textColorOnCourseBlock } from "./courseColors.js"
 import { toMinutes } from "./conflicts.js"
 import { formatTimeRange12h } from "./timeFormat.js"
 
-/** Default vertical scale for the week time grid (px per 1h). */
+// Default vertical scale for the week time grid (px per 1h)
 export const PX_PER_HOUR = 48
 
+// Constants describing minutes per day and default focal window used when compacting the view
 const MIN_IN_DAY = 24 * 60
 const DEFAULT_FOCAL_START = 7 * 60
 const DEFAULT_FOCAL_END = 19 * 60
@@ -48,9 +50,11 @@ export function getViewWindowFromBlocks(blocks, compact) {
   return { viewStartMin, viewEndMin }
 }
 
+// Build visual blocks used by the TimeGridCalendar from courses and personal events
 export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] }) {
   const blocks = []
 
+  // Add course meeting blocks for enrolled courses (solid blocks)
   for (const course of enrolledCourses) {
     for (const m of course.meetingTimes) {
       blocks.push({
@@ -72,6 +76,7 @@ export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] 
     }
   }
 
+  // Add course meeting blocks for plan-only courses (striped blocks)
   for (const course of plannedOnly) {
     for (const m of course.meetingTimes) {
       blocks.push({
@@ -93,6 +98,7 @@ export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] 
     }
   }
 
+  // Add personal weekly event blocks to the grid
   for (const event of events) {
     for (const day of event.days) {
       blocks.push({
@@ -114,10 +120,11 @@ export function buildTimeGridBlocks({ enrolledCourses, events, plannedOnly = [] 
     }
   }
 
+  // Return the assembled list of blocks (courses + events)
   return blocks
 }
 
-/** True if two blocks overlap in time on the same weekday column. */
+// True if two blocks overlap in time on the same weekday column
 export function intervalsOverlap(a, b) {
   if (a.columnDay !== b.columnDay) {
     return false
@@ -193,6 +200,7 @@ export function assignLanesInCluster(clusterBlocks) {
 }
 
 /**
+ * Assign lanes to overlapping blocks within a single day column
  * @param {Array<Record<string, unknown>>} dayBlocks Blocks for a single day column
  * @returns {Map<string, { lane: number, totalLanes: number }>}
  */
@@ -205,10 +213,12 @@ export function layoutOverlappingDayBlocks(dayBlocks) {
   return out
 }
 
+// Format an hour gutter label (12-hour clock) used by the grid and pop-out
 export function formatHourGutterLabel(h) {
   return h === 0 ? "12 am" : h < 12 ? `${h} am` : h === 12 ? "12 pm" : `${h - 12} pm`
 }
 
+// Generate a complete, read-only HTML string for a pop-out calendar window
 export function popoutHtmlForGrid(
   userName,
   blocks,
@@ -218,6 +228,7 @@ export function popoutHtmlForGrid(
   caption = "Read-only pop-out. Same schedule as the main app.",
   options = {},
 ) {
+  // Extract optional logo sources and compute general layout sizes
   const {
     logoIconSrc = "",
     logoTextSrc = "",
@@ -234,6 +245,7 @@ export function popoutHtmlForGrid(
     return `top:${top}px;height:${Math.max(h, 20)}px;background:${bg};color:${textColorOnCourseBlock(base)};border-radius:6px;padding:3px 4px;font-size:11px;line-height:1.25;overflow:hidden;position:absolute;left:1px;right:1px;box-sizing:border-box;`
   }
 
+  // Build HTML columns for each day with positioned blocks converted to inline-style divs
   const cols = days
     .map((day) => {
       const dayBlocks = blocks
@@ -260,6 +272,7 @@ export function popoutHtmlForGrid(
     })
     .join("")
 
+  // Build left gutter time labels for the pop-out HTML
   const timeAxisParts = []
   for (let t = viewStartMin; t < viewEndMin; t += 60) {
     const h = t / 60
@@ -271,6 +284,7 @@ export function popoutHtmlForGrid(
   }
   const timeAxis = timeAxisParts.join("")
 
+  // Return a full HTML document string for the pop-out calendar (self-contained)
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Easy Enroll — ${escapeHtml(
     userName,
   )}</title></head>
@@ -292,6 +306,7 @@ export function popoutHtmlForGrid(
   </body></html>`
 }
 
+// Escape user-supplied values for safe injection into generated HTML
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")

@@ -1,5 +1,7 @@
+// iCalendar helpers for exporting weekly/semester schedules and single-course meeting times
 import { scheduleColumnDays, toMinutes } from "./conflicts.js"
 
+// Map full weekday names to iCalendar BYDAY two-letter codes
 const ICAL_DOW = {
   Monday: "MO",
   Tuesday: "TU",
@@ -10,6 +12,7 @@ const ICAL_DOW = {
   Sunday: "SU",
 }
 
+// Escape special characters in text before inserting into iCalendar content
 function escapeIcsText(s) {
   if (s == null) {
     return ""
@@ -21,7 +24,7 @@ function escapeIcsText(s) {
     .replace(/\n/g, "\\n")
 }
 
-/** Monday 00:00 local time of the week containing `d`. */
+// Monday 00:00 local time of the week containing `d`
 function startOfWeekMonday(d) {
   const x = new Date(d)
   const jsDay = x.getDay()
@@ -31,11 +34,12 @@ function startOfWeekMonday(d) {
   return x
 }
 
+// Zero-pad a number to two digits
 function pad2(n) {
   return String(n).padStart(2, "0")
 }
 
-/** Local `YYYYMMDDTHHmmss` (floating time) for iCalendar. */
+// Local `YYYYMMDDTHHmmss` (floating time) for iCalendar
 function formatIcsDateTime(d) {
   return (
     `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}` +
@@ -44,6 +48,7 @@ function formatIcsDateTime(d) {
 }
 
 /**
+ * Builds an iCalendar string for a week starting on a specific Monday.
  * @param {Array<Record<string, unknown>>} blocks
  * @param {string} calName
  * @param {number} weekCount
@@ -109,6 +114,7 @@ function buildWeekForAnchorMonday(blocks, calName, weekCount, anchorMonday) {
 }
 
 /**
+ * Builds an iCalendar string for a week starting on a specific Monday.
  * @param {Array<Record<string, unknown>>} blocks
  * @param {string} [calName]
  * @param {number} [weekCount] recurring count
@@ -120,6 +126,7 @@ export function buildWeekScheduleIcs(blocks, calName = "My week", weekCount = 16
   return buildWeekForAnchorMonday(blocks, calName, weekCount, startOfWeekMonday(new Date()))
 }
 
+// Trigger a download of the provided iCalendar text as a .ics file
 export function downloadIcsFile(icsString, filename = "schedule.ics") {
   if (!icsString) {
     return
@@ -134,12 +141,13 @@ export function downloadIcsFile(icsString, filename = "schedule.ics") {
   URL.revokeObjectURL(url)
 }
 
-/** Mock Spring 2026 term: week 1 starts Monday Jan 12 (local), 16 weeks — not official registrar data. */
+// Mock Spring 2026 term: week 1 starts Monday Jan 12 (local), 16 weeks — not official registrar data
 export const MOCK_SEMESTER_START_MONDAY = new Date(2026, 0, 12, 0, 0, 0, 0)
 
 const DEFAULT_SEMESTER_WEEKS = 16
 
 /**
+ * Builds an iCalendar string for a semester schedule.
  * @param {Array<Record<string, unknown>>} blocks
  * @param {string} [calName]
  * @param {number} [weekCount]
@@ -158,6 +166,7 @@ export function buildSemesterScheduleIcs(
 }
 
 /**
+ * Builds an iCalendar string for a single course with meeting times.
  * @param {{ id: string, title: string, meetingTimes: Array<{ day: string, start: string, end: string }> }} course
  * @param {string} [calName]
  * @param {number} [weekCount]
